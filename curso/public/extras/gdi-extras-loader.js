@@ -26,7 +26,7 @@
   //   @main                          (curto)
   //   @refs/heads/main               (longo, mais explícito)
   // Ambos funcionam. Usamos o formato curto para URL menor.
-  const BASE_URL = 'https://cdn.jsdelivr.net/gh/esaaraujo-lab/gdi_extras@main/modular/';
+  const BASE_URL = 'https://raw.githubusercontent.com/esaaraujo-lab/gdi_extras/refs/heads/main/modular/';
 
   // ★ Cache-buster: muda quando você publicar nova versão dos módulos.
   // Isto é adicionado como ?v=N a cada URL para forçar jsdelivr+browser

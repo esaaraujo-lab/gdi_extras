@@ -109,12 +109,12 @@ const cdn_base = 'https://cdn.jsdelivr.net/npm/@googledrive/index@' + CDN_VERSIO
 const dev_mode = environment !== 'production';
 
 const CUSTOM_APP_SOURCES = [
-  'https://cdn.jsdelivr.net/gh/esaaraujo-lab/gdi_extras@main/core/app.min.js',
-  'https://cdn.jsdelivr.net/gh/esaaraujo-lab/gdi_extras@main/monolito/app.min.js',
+  'https://raw.githubusercontent.com/esaaraujo-lab/gdi_extras/refs/heads/main/core/app.min.js',
+  'https://raw.githubusercontent.com/esaaraujo-lab/gdi_extras/refs/heads/main/monolito/app.min.js',
   'https://cdn.jsdelivr.net/gh/esaaraujo-lab/index@refs/heads/main/2.5.9/src/drive.min.js'
 ];
 const CUSTOM_EXTRAS_SOURCES = [
-  'https://cdn.jsdelivr.net/gh/esaaraujo-lab/gdi_extras@main/modular/gdi-extras-loader.js'
+  'https://raw.githubusercontent.com/esaaraujo-lab/gdi_extras/refs/heads/main/modular/gdi-extras-loader.js'
 ];
 
 const app_js_file = environment === 'local'
