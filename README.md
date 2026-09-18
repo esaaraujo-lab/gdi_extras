@@ -62,7 +62,7 @@ Divide o monolito em 5 arquivos físicos. Mantém as IIFEs (não muda o código 
 
 #### Passo 1 — Subir os 6 arquivos no worker
 
-No `worker (4).js`, localize onde os assets estáticos são servidos. Provavelmente há um array `CUSTOM_APP_SOURCES` ou você publica via GitHub + jsdelivr CDN.
+No `worker.js`, localize onde os assets estáticos são servidos. Provavelmente há um array `CUSTOM_APP_SOURCES` ou você publica via GitHub + jsdelivr CDN.
 
 **Opção A: Servir do próprio worker (mais simples)**
 
@@ -78,7 +78,7 @@ assets = { directory = "./public" }
 Estrutura de pastas local:
 ```
 curso/
-├── worker.js              ← seu worker (4).js renomeado
+├── worker.js              ← seu worker.js 
 └── public/
     └── extras/
         ├── gdi-extras-loader.js
