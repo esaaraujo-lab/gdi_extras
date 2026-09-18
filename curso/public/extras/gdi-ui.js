@@ -417,7 +417,7 @@ body.gdi-fv .gdi-player-wrap iframe{
             cfg.short=clamp(parseInt($id('gdi-pom-c-short').value)||5,1,30);
             cfg.long=clamp(parseInt($id('gdi-pom-c-long').value)||15,1,60);
             cfg.sessions=clamp(parseInt($id('gdi-pom-c-sess').value)||4,1,10);
-            localStorage.setItem(CKEY,JSON.stringify(cfg));
+            try{localStorage.setItem(CKEY,JSON.stringify(cfg));}catch(_){showToast('Erro ao salvar config');}
             if($id('gdi-pom-c-work'))$id('gdi-pom-c-work').value=cfg.work;
             if($id('gdi-pom-c-short'))$id('gdi-pom-c-short').value=cfg.short;
             if($id('gdi-pom-c-long'))$id('gdi-pom-c-long').value=cfg.long;
@@ -427,7 +427,7 @@ body.gdi-fv .gdi-player-wrap iframe{
         }
       });
       const autoChk=$id('gdi-pom-c-auto');
-      if(autoChk&&!autoChk.__pomBound){autoChk.__pomBound=true;autoChk.addEventListener('change',e=>{cfg.autoStart=e.target.checked;localStorage.setItem(CKEY,JSON.stringify(cfg));});}
+      if(autoChk&&!autoChk.__pomBound){autoChk.__pomBound=true;autoChk.addEventListener('change',e=>{cfg.autoStart=e.target.checked;try{localStorage.setItem(CKEY,JSON.stringify(cfg));}catch(_){}});}
     }
     // binda imediatamente + após injetar
     setTimeout(bindPomClicks,50);
@@ -824,7 +824,7 @@ body.gdi-fv .gdi-player-wrap iframe{
       .slice(0,30);
     (async()=>{
       for(const row of rows){
-        if(!document.body.contains(row))return;
+        if(!document.body.contains(row))continue;  // ★FIX: era return, interrompia o loop todo
         const href=row.getAttribute('href')||'';
         if(!href||href.startsWith('/fallback'))continue;
         const files=await gdiListAllFiles(href,gdiGetPw(href));
@@ -1165,7 +1165,8 @@ window.GDI_MODULES.push({name:'debug',init:function(){
       fBtn.innerHTML='<i class="bi bi-funnel'+(on?'-fill':'')+'"></i>';};
     fBtn.addEventListener('click',()=>{
       const on=localStorage.getItem(LS_HIDE)==='1';
-      localStorage.setItem(LS_HIDE,on?'0':'1');fSync();renderItems();});
+      try{localStorage.setItem(LS_HIDE,on?'0':'1');}catch(_){}
+      fSync();renderItems();});
     fSync();
     wrap.querySelector('#gdi-pl-reload').addEventListener('click',()=>{
       try{localStorage.removeItem('gdi-xpl::'+(window.location.host||'')+'::'+parentPath())}catch(_){}
