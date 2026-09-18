@@ -827,7 +827,7 @@
   const saveCards=c=>lsSet(LS_CARDS,c);
   const dueCards=()=>cards().filter(c=>(c.due||0)<=Date.now());
   let FC={active:false,flip:null,grade:null};
-  let panel=null,tab='cursos';
+  let panel=null,tab='home';
   function openPanel(t){
     if(t)tab=t;
     if(!panel){
@@ -852,32 +852,89 @@
   function renderPanel(){
     if(!panel)return;
     const t=todayMin(),g=goalMin(),pct=Math.min(100,Math.round(t/g*100));
+    // ★ calcula stats para o header (streak, cards devidos)
+    const cards=lsGet(LS_CARDS,[]);
+    const dueCount=cards.filter(c=>(c.due||0)<=Date.now()).length;
+    // streak
+    const watch=lsGet(LS_WATCH,{});
+    const acts={};const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
+    for(const k in watch)touch(watch[k]&&watch[k].at);
+    let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
+    if(!has(dd))dd.setDate(dd.getDate()-1);
+    while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
+
+    // ★ definição das abas agrupadas
+    const TAB_GROUPS=[
+      {label:null,tabs:[
+        {id:'home',icon:'bi-house-door',label:'Início'}
+      ]},
+      {label:'Estudar',tabs:[
+        {id:'cursos',icon:'bi-mortarboard',label:'Meus Cursos'},
+        {id:'questoes',icon:'bi-patch-question',label:'Questões'},
+        {id:'simulado',icon:'bi-stopwatch',label:'Simulado'},
+        {id:'mar',icon:'bi-rocket-takeoff',label:'Maratona'}
+      ]},
+      {label:'Revisar',tabs:[
+        {id:'revisoes',icon:'bi-clock-history',label:'Revisões'},
+        {id:'fc',icon:'bi-card-text',label:'Flashcards',badge:dueCount||null}
+      ]},
+      {label:'Organizar',tabs:[
+        {id:'subjects',icon:'bi-journal-text',label:'Matérias'},
+        {id:'trails',icon:'bi-signpost-2',label:'Trilhas'}
+      ]},
+      {label:'Materiais',tabs:[
+        {id:'resumos',icon:'bi-clipboard',label:'Resumos'},
+        {id:'provas',icon:'bi-file-earmark-text',label:'Provas'},
+        {id:'redacao',icon:'bi-pencil-square',label:'Redação'}
+      ]},
+      {label:'Planejar',tabs:[
+        {id:'cronograma',icon:'bi-calendar3',label:'Cronograma'},
+        {id:'stats',icon:'bi-graph-up',label:'Estatísticas'},
+        {id:'radar',icon:'bi-bullseye',label:'Mapa de Fracos'},
+        {id:'achievements',icon:'bi-trophy',label:'Conquistas'}
+      ]}
+    ];
+
     panel.innerHTML=`<div class="gdi-central-box">
       <div class="gdi-central-head">
-        <b style="color:var(--ferreto-text,#f0f6fc);font-size:16px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">\ud83d\udcda Central de Estudos</b>
-        <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">Meta hoje: ${fmtMin(t)}/${fmtMin(g)}</span>
-        <div style="flex:1;max-width:160px;height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.1));border-radius:3px;overflow:hidden;"><div style="height:6px;width:${pct}%;background:${t>=g?'#2f9e44':'var(--ferreto-grad)'};"></div></div>
-        <input id="gdi-goal-set" type="number" min="10" max="480" value="${g}" title="Meta di\u00e1ria (minutos)" style="width:56px;background:var(--ferreto-surface-2,rgba(255,255,255,.07));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#f0f6fc);text-align:center;padding:3px 5px;font-size:12px;">
-        <button class="gdi-mode-btn" id="gdi-central-x" style="padding:4px 10px;margin-left:auto;order:99;" title="Fechar (Esc)">\u2715</button>
+        <div class="gdi-central-head-title">
+          <span class="gdi-central-icon">📚</span>
+          <b>Central de Estudos</b>
+        </div>
+        <div class="gdi-central-stats">
+          <span class="gdi-central-stat" title="Sequência de dias estudando">
+            <i class="bi bi-fire gdi-stat-fire"></i>
+            <b>${streak}</b><span style="color:var(--ferreto-text-muted,#8b949e);">dias</span>
+          </span>
+          <span class="gdi-central-stat" title="Tempo estudado hoje">
+            <i class="bi bi-clock gdi-stat-time"></i>
+            <b>${fmtMin(t)}</b><span style="color:var(--ferreto-text-muted,#8b949e);">/${fmtMin(g)}</span>
+          </span>
+          ${dueCount?`<span class="gdi-central-stat" title="Flashcards para revisar hoje">
+            <i class="bi bi-card-text gdi-stat-cards"></i>
+            <b>${dueCount}</b><span style="color:var(--ferreto-text-muted,#8b949e);">cards</span>
+          </span>`:''}
+        </div>
+        <input id="gdi-goal-set" type="number" min="10" max="480" value="${g}" title="Meta diária (minutos)" style="width:56px;background:var(--ferreto-surface-2,rgba(255,255,255,.07));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#f0f6fc);text-align:center;padding:5px;font-size:12px;flex-shrink:0;">
+        <button id="gdi-central-x" title="Fechar (Esc)">✕</button>
       </div>
-      <div class="gdi-central-tabs">
-        <button class="gdi-central-tab ${tab==='cursos'?'active':''}" data-t="cursos">\ud83d\udccd Meus Cursos</button>
-        <button class="gdi-central-tab ${tab==='questoes'?'active':''}" data-t="questoes">\u2753 Quest\u00f5es</button>
-        <button class="gdi-central-tab ${tab==='simulado'?'active':''}" data-t="simulado">\ud83c\udfaf Simulado</button>
-        <button class="gdi-central-tab ${tab==='cronograma'?'active':''}" data-t="cronograma">\ud83d\udcc5 Cronograma</button>
-        <button class="gdi-central-tab ${tab==='revisoes'?'active':''}" data-t="revisoes">\u23f0 Revis\u00f5es</button>
-        <button class="gdi-central-tab ${tab==='resumos'?'active':''}" data-t="resumos">\ud83d\udccb Resumos</button>
-        <button class="gdi-central-tab ${tab==='provas'?'active':''}" data-t="provas">\ud83d\udcc4 Provas</button>
-        <button class="gdi-central-tab ${tab==='redacao'?'active':''}" data-t="redacao">\u270d\ufe0f Reda\u00e7\u00e3o</button>
-        <button class="gdi-central-tab ${tab==='radar'?'active':''}" data-t="radar">\ud83c\udfaf Mapa de Fracos</button>
-        <button class="gdi-central-tab ${tab==='stats'?'active':''}" data-t="stats">\ud83d\udcca Estat\u00edsticas</button>
-        <button class="gdi-central-tab ${tab==='fc'?'active':''}" data-t="fc">\ud83e\uddf0 Flashcards</button>
-        <button class="gdi-central-tab ${tab==='subjects'?'active':''}" data-t="subjects">\ud83d\udcdd Mat\u00e9rias</button>
-        <button class="gdi-central-tab ${tab==='trails'?'active':''}" data-t="trails">\ud83c\udfaft Trilhas</button>
-        <button class="gdi-central-tab ${tab==='achievements'?'active':''}" data-t="achievements">\ud83c\udfc6 Conquistas</button>
-        <button class="gdi-central-tab ${tab==='mar'?'active':''}" data-t="mar">\ud83d\ude80 Maratona</button>
+      <div class="gdi-central-main">
+        <aside class="gdi-central-sidebar">
+          ${TAB_GROUPS.map(group=>`
+            <div class="gdi-central-sidebar-group">
+              ${group.label?`<div class="gdi-central-sidebar-label">${group.label}</div>`:''}
+              ${group.tabs.map(t=>`
+                <button class="gdi-central-tab ${tab===t.id?'active':''}" data-t="${t.id}">
+                  <i class="bi ${t.icon}"></i>
+                  <span>${t.label}</span>
+                  ${t.badge?`<span class="gdi-tab-badge">${t.badge}</span>`:''}
+                </button>
+              `).join('')}
+            </div>
+          `).join('')}
+        </aside>
+        <div class="gdi-central-body" id="gdi-central-body"></div>
       </div>
-      <div class="gdi-central-body" id="gdi-central-body"></div>
     </div>`;
     panel.querySelector('#gdi-central-x').onclick=closePanel;
     panel.querySelector('#gdi-goal-set').addEventListener('change',e=>{
@@ -891,21 +948,146 @@
       tab=b.dataset.t;FC.active=false;renderPanel();
     });
     const body=panel.querySelector('#gdi-central-body');
-    if(tab==='cursos')renderCursos(body);
+    if(tab==='home')renderHome(body);
+    else if(tab==='cursos')renderCursos(body);
     else if(tab==='questoes')renderQuestoes(body);
     else if(tab==='simulado')renderSimulado(body);
     else if(tab==='cronograma')renderCronograma(body);
     else if(tab==='revisoes')renderRevisoes(body);
-    else if(tab==='resumos'){if(window.renderResumos)renderResumos(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de resumos indispon\u00edvel.</div>';}
-    else if(tab==='provas'){if(window.renderProvas)window.renderProvas(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de provas indispon\u00edvel.</div>';}
-    else if(tab==='redacao'){if(window.renderRedacao)window.renderRedacao(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de reda\u00e7\u00e3o indispon\u00edvel.</div>';}
-    else if(tab==='radar'){if(window.renderRadar)window.renderRadar(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de radar indispon\u00edvel.</div>';}
+    else if(tab==='resumos'){if(window.renderResumos)renderResumos(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">📋</span><h3>Resumos indisponíveis</h3><p>O módulo de resumos não carregou. Tente recarregar a página.</p></div>';}
+    else if(tab==='provas'){if(window.renderProvas)window.renderProvas(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">📄</span><h3>Provas indisponíveis</h3><p>O módulo de provas não carregou.</p></div>';}
+    else if(tab==='redacao'){if(window.renderRedacao)window.renderRedacao(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">✍️</span><h3>Redação indisponível</h3><p>O módulo de redação não carregou.</p></div>';}
+    else if(tab==='radar'){if(window.renderRadar)window.renderRadar(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">🎯</span><h3>Radar indisponível</h3><p>O módulo de radar não carregou.</p></div>';}
     else if(tab==='stats')renderStats(body);
     else if(tab==='fc')renderFlash(body);
     else if(tab==='subjects')renderSubjects(body);
     else if(tab==='trails')renderTrails(body);
     else if(tab==='achievements')renderAchievements(body);
     else renderMarathon(body);
+  }
+
+  // ★ Dashboard "Início" — visão geral com atalhos
+  function renderHome(box){
+    const t=todayMin(),g=goalMin(),pct=Math.min(100,Math.round(t/g*100));
+    const cards=lsGet(LS_CARDS,[]);
+    const dueCount=cards.filter(c=>(c.due||0)<=Date.now()).length;
+    const courses=collectCourses();
+    const subjects=(window.gdiSubjects?window.gdiSubjects.get():[]).length;
+    const trails=(window.gdiTrails?window.gdiTrails.get():[]).length;
+    const achievements=window.gdiAchievements?window.gdiAchievements.getUnlocked().length:0;
+    const totalAchievements=window.gdiAchievements?window.gdiAchievements.defs().length:0;
+    const hour=new Date().getHours();
+    const greeting=hour<12?'Bom dia':hour<18?'Boa tarde':'Boa noite';
+
+    box.innerHTML=`
+      <div class="gdi-dashboard-hero">
+        <h2>${greeting}! 👋</h2>
+        <p>${t>=g?'<b style="color:#3fb950;">Meta batida hoje!</b> Parabéns, continue assim. 🎉':'Continue estudando para bater sua meta diária.'}</p>
+        <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ferreto-text-muted,#8b949e);margin-bottom:4px;">
+              <span>Progresso de hoje</span>
+              <span><b style="color:var(--ferreto-text,#f0f6fc);">${fmtMin(t)}</b> / ${fmtMin(g)}</span>
+            </div>
+            <div class="gdi-progress-bar" style="margin:0;"><div class="gdi-progress-fill" style="width:${pct}%;${t>=g?'background:#3fb950':''}"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="gdi-dashboard-grid">
+        <div class="gdi-dashboard-card" data-action="fc">
+          <span class="gdi-dashboard-card-icon">🃏</span>
+          <span class="gdi-dashboard-card-num">${dueCount}</span>
+          <span class="gdi-dashboard-card-label">Cards para revisar</span>
+          <span class="gdi-dashboard-card-meta">${cards.length} cards no total</span>
+        </div>
+        <div class="gdi-dashboard-card" data-action="cursos">
+          <span class="gdi-dashboard-card-icon">📚</span>
+          <span class="gdi-dashboard-card-num">${courses.length}</span>
+          <span class="gdi-dashboard-card-label">Cursos em andamento</span>
+          <span class="gdi-dashboard-card-meta">${courses.filter(c=>c.watched>0).length} com progresso</span>
+        </div>
+        <div class="gdi-dashboard-card" data-action="subjects">
+          <span class="gdi-dashboard-card-icon">📝</span>
+          <span class="gdi-dashboard-card-num">${subjects}</span>
+          <span class="gdi-dashboard-card-label">Matérias</span>
+          <span class="gdi-dashboard-card-meta">${trails} trilhas ativas</span>
+        </div>
+        <div class="gdi-dashboard-card" data-action="achievements">
+          <span class="gdi-dashboard-card-icon">🏆</span>
+          <span class="gdi-dashboard-card-num">${achievements}</span>
+          <span class="gdi-dashboard-card-label">Conquistas</span>
+          <span class="gdi-dashboard-card-meta">de ${totalAchievements} possíveis</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;margin-bottom:10px;">Atalhos rápidos</b>
+        <div class="gdi-quick-actions">
+          <button class="gdi-quick-action" data-action="fc"><i class="bi bi-card-text"></i> Estudar flashcards</button>
+          <button class="gdi-quick-action" data-action="cursos"><i class="bi bi-mortarboard"></i> Continuar curso</button>
+          <button class="gdi-quick-action" data-action="questoes"><i class="bi bi-patch-question"></i> Resolver questões</button>
+          <button class="gdi-quick-action" data-action="simulado"><i class="bi bi-stopwatch"></i> Fazer simulado</button>
+          <button class="gdi-quick-action" data-action="subjects"><i class="bi bi-journal-text"></i> Gerenciar matérias</button>
+          <button class="gdi-quick-action" data-action="resumos"><i class="bi bi-clipboard"></i> Ver resumos</button>
+        </div>
+      </div>
+
+      ${courses.length?`
+      <div>
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;margin-bottom:10px;">Continue de onde parou</b>
+        <div class="gdi-courses">
+          ${courses.slice(0,3).map(c=>{
+            const name=cleanCourseName(c.key);
+            const drive=driveNameOf(c.key);
+            const progress=c.lessons.size>0?Math.round(c.watched/c.lessons.size*100):0;
+            const progressColor=progress>=80?'#3fb950':progress>=40?'#ffd43b':'var(--ferreto-primary,#ff8b9f)';
+            return `<div class="gdi-course" data-course-key="${escHtml(c.key)}" style="cursor:pointer;">
+              <b title="${escHtml(courseName(c.key))}">${escHtml(name)}</b>
+              ${drive?`<small><i class="bi bi-hdd"></i> ${escHtml(drive)}</small>`:'<small>&nbsp;</small>'}
+              <div class="gdi-course-stats">
+                <div class="gdi-course-stat"><span class="gdi-course-stat-num">${c.lessons.size}</span><span class="gdi-course-stat-label">Aulas</span></div>
+                <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#3fb950;">${c.watched}</span><span class="gdi-course-stat-label">Feitas</span></div>
+                <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">${c.lessons.size-c.watched}</span><span class="gdi-course-stat-label">Restam</span></div>
+                <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:${progressColor};">${progress}%</span><span class="gdi-course-stat-label">Concl.</span></div>
+              </div>
+              <div class="gdi-progress-bar"><div class="gdi-progress-fill" style="width:${progress}%;background:${progressColor};"></div></div>
+              <button class="gdi-btn-continue" disabled><i class="bi bi-hourglass-split"></i> Verificando…</button>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`:''}
+    `;
+
+    // bind quick actions
+    box.querySelectorAll('[data-action]').forEach(el=>{
+      el.onclick=()=>{
+        tab=el.dataset.action;
+        renderPanel();
+      };
+    });
+    // bind course cards (continue)
+    box.querySelectorAll('[data-course-key]').forEach(card=>{
+      const ck=card.dataset.courseKey;
+      const contBtn=card.querySelector('.gdi-btn-continue');
+      bestIn(ck).then(target=>{
+        if(target){
+          contBtn.disabled=false;
+          contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
+          contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
+        }else{
+          contBtn.disabled=true;
+          contBtn.className='gdi-btn-continue gdi-btn-done';
+          contBtn.innerHTML='<i class="bi bi-check2-all"></i> Tudo em dia!';
+        }
+      });
+      card.onclick=(e)=>{
+        if(e.target.closest('button'))return;
+        // abre detalhe do curso
+        const c=courses.find(x=>x.key===ck);
+        if(c)openCourseDetail(box,c);
+      };
+    });
   }
 
   // ★ Aba "Trilhas" — agrupar cursos em uma meta
@@ -1222,15 +1404,20 @@
     const cs=collectCourses();
     const hidden=listHiddenCourses();
     if(!cs.length){
-      box.innerHTML=`<div class="gdi-notes-empty" style="padding:60px;text-align:center;">
-        <i class="bi bi-mortarboard" style="font-size:48px;display:block;margin-bottom:14px;color:var(--ferreto-text-faint,#6b7488);"></i>
-        Nenhum estudo registrado ainda.<br>
-        <span style="font-size:12px;">Assista uma aula para começar!</span>
-        ${hidden.length?`<div style="margin-top:24px;padding:14px;background:var(--ferreto-surface-2,#161b22);border:1px solid var(--ferreto-border,#21262d);border-radius:10px;text-align:left;">
+      box.innerHTML=`<div class="gdi-empty-state">
+        <span class="gdi-empty-state-icon">🎓</span>
+        <h3>Nenhum estudo registrado ainda</h3>
+        <p>Assista uma aula para que ela apareça aqui automaticamente, ou crie um curso manual para organizar seus estudos.</p>
+        <div class="gdi-quick-actions" style="justify-content:center;margin-bottom:20px;">
+          <button id="gdi-empty-add-course" class="gdi-quick-action"><i class="bi bi-plus-lg"></i> Adicionar curso manual</button>
+        </div>
+        ${hidden.length?`<div style="margin-top:24px;padding:14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);border-radius:10px;text-align:left;max-width:400px;margin-left:auto;margin-right:auto;">
           <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;display:block;margin-bottom:8px;"><i class="bi bi-eye-slash"></i> ${hidden.length} curso${hidden.length>1?'s':''} oculto${hidden.length>1?'s':''}</b>
           <button id="gdi-restore-courses" class="gdi-mode-btn" style="font-size:12px;"><i class="bi bi-arrow-counterclockwise"></i> Restaurar cursos ocultos</button>
         </div>`:''}
       </div>`;
+      const emptyAdd=box.querySelector('#gdi-empty-add-course');
+      if(emptyAdd)emptyAdd.onclick=()=>showAddCourseModal(box);
       const restoreBtn=box.querySelector('#gdi-restore-courses');
       if(restoreBtn)restoreBtn.onclick=async ()=>{
         const ok=await window.gdiModal({
@@ -1308,6 +1495,7 @@
       const drive=driveNameOf(c.key);
       const progress=c.lessons.size>0?Math.round(c.watched/c.lessons.size*100):0;
       const progressColor=progress>=80?'#3fb950':progress>=40?'#ffd43b':'var(--ferreto-primary,#ff8b9f)';
+      const remaining=c.lessons.size-c.watched;
       const el=document.createElement('div');el.className='gdi-course';
       el.style.cursor='pointer';
       el.innerHTML=`
@@ -1315,11 +1503,15 @@
           <b title="${escHtml(courseName(c.key))}" style="flex:1;min-width:0;">${escHtml(name)}</b>
           <button class="gdi-course-remove" title="Ocultar curso" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:14px;padding:2px 6px;flex:none;border-radius:6px;transition:all .15s;"><i class="bi bi-x-lg"></i></button>
         </div>
-        ${drive?`<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:2px;"><i class="bi bi-hdd"></i> ${escHtml(drive)}</small>`:''}
-        <small>${c.lessons.size} aula${c.lessons.size>1?'s':''}${c.watched?` · <b style="color:#3fb950;">${c.watched} ✓</b>`:''} · última: ${c.lastAt?dateBr(c.lastAt):'—'}</small>
-        ${c.lessons.size>0?`<div style="height:5px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;margin:8px 0 12px;"><div style="height:5px;width:${progress}%;background:${progressColor};border-radius:3px;transition:width .3s;"></div></div>
-        <small style="color:var(--ferreto-text-muted,#8b949e);font-size:10px;display:block;margin-bottom:8px;">${progress}% concluído</small>`:''}
-        <button class="gdi-btn gdi-btn-primary gdi-course-continue" style="font-size:12px;width:100%;justify-content:center;" disabled><i class="bi bi-hourglass-split"></i> Verificando…</button>`;
+        ${drive?`<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:2px;"><i class="bi bi-hdd"></i> ${escHtml(drive)}${c.lastAt?` · última: ${dateBr(c.lastAt)}`:''}</small>`:'<small>&nbsp;</small>'}
+        <div class="gdi-course-stats">
+          <div class="gdi-course-stat"><span class="gdi-course-stat-num">${c.lessons.size}</span><span class="gdi-course-stat-label">Aulas</span></div>
+          <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#3fb950;">${c.watched}</span><span class="gdi-course-stat-label">Feitas</span></div>
+          <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">${remaining}</span><span class="gdi-course-stat-label">Restam</span></div>
+          <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:${progressColor};">${progress}%</span><span class="gdi-course-stat-label">Concl.</span></div>
+        </div>
+        <div class="gdi-progress-bar"><div class="gdi-progress-fill" style="width:${progress}%;background:${progressColor};"></div></div>
+        <button class="gdi-btn-continue gdi-course-continue" disabled><i class="bi bi-hourglass-split"></i> Verificando…</button>`;
       grid.appendChild(el);
 
       const contBtn=el.querySelector('.gdi-course-continue');
@@ -1330,9 +1522,8 @@
           contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
         }else{
           contBtn.disabled=true;
-          contBtn.className='gdi-mode-btn gdi-course-continue';
-          contBtn.style.width='100%';contBtn.style.justifyContent='center';
-          contBtn.innerHTML='<i class="bi bi-check2-all" style="color:#3fb950;"></i> Tudo em dia!';
+          contBtn.className='gdi-btn-continue gdi-btn-done';
+          contBtn.innerHTML='<i class="bi bi-check2-all"></i> Tudo em dia!';
         }
       });
 
@@ -1885,24 +2076,107 @@
   }
   if(!document.getElementById('gdi-central-style')){
     const s=document.createElement('style');s.id='gdi-central-style';s.textContent=`
-/* ★ TELA CHEIA — Central de Estudos ocupa toda a viewport */
-#gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);display:none;align-items:stretch;justify-content:stretch;padding:0;}
+/* ═══ CENTRAL DE ESTUDOS v3 — design moderno (sidebar + dashboard) ═══ */
+#gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);display:none;align-items:stretch;justify-content:stretch;padding:0;animation:gdi-central-in .25s ease;}
+@keyframes gdi-central-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
 .gdi-central-box{background:var(--ferreto-bg,#0f1218);border:0;border-radius:0;width:100%;max-width:none;max-height:100dvh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
-.gdi-central-head{display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid var(--ferreto-border,#21262d);flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,139,159,.1),rgba(93,222,218,.06));flex-shrink:0;}
-.gdi-central-tabs{display:flex;gap:4px;padding:8px 24px 0;border-bottom:1px solid var(--ferreto-border,#21262d);flex-wrap:wrap;flex-shrink:0;overflow-x:auto;}
-.gdi-central-tab{background:none;border:0;color:var(--ferreto-text-muted,#8b949e);padding:10px 16px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;font-family:var(--ferreto-font-body,'Rubik',sans-serif);white-space:nowrap;}
-.gdi-central-tab:hover{color:var(--ferreto-text,#f0f6fc);}
-.gdi-central-tab.active{color:var(--ferreto-text,#f0f6fc);border-bottom-color:var(--ferreto-primary,#ff8b9f);}
-.gdi-central-body{flex:1;overflow-y:auto;padding:24px;color:var(--ferreto-text,#f0f6fc);}
-.gdi-courses{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
-.gdi-course{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:16px;transition:border-color .15s,transform .15s;}
-.gdi-course:hover{border-color:var(--ferreto-border-strong,#30363d);transform:translateY(-2px);}
-.gdi-course b{color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--ferreto-font-display,'Poppins',sans-serif);}
+/* Header — minimalista, com stats rápidas */
+.gdi-central-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.05));flex-shrink:0;flex-wrap:nowrap;}
+.gdi-central-head-title{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.gdi-central-head-title b{color:var(--ferreto-text,#f0f6fc);font-size:16px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-weight:600;}
+.gdi-central-head-title .gdi-central-icon{font-size:22px;}
+.gdi-central-stats{display:flex;gap:8px;flex:1;justify-content:center;flex-wrap:wrap;}
+.gdi-central-stat{display:flex;align-items:center;gap:6px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);border-radius:999px;padding:5px 12px;font-size:12px;color:var(--ferreto-text,#e6edf3);}
+.gdi-central-stat i{font-size:13px;}
+.gdi-central-stat b{color:var(--ferreto-text,#f0f6fc);font-weight:600;}
+.gdi-central-stat .gdi-stat-fire{color:#ff6b6b;}
+.gdi-central-stat .gdi-stat-time{color:#ffd43b;}
+.gdi-central-stat .gdi-stat-cards{color:var(--ferreto-primary,#ff8b9f);}
+#gdi-central-x{margin-left:auto;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text-muted,#8b949e);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
+#gdi-central-x:hover{background:rgba(255,107,107,.15);color:#ff8b8b;border-color:rgba(255,107,107,.3);}
+/* Layout principal: sidebar + body */
+.gdi-central-main{flex:1;display:flex;overflow:hidden;}
+/* Sidebar */
+.gdi-central-sidebar{width:220px;flex-shrink:0;background:var(--ferreto-bg-2,#0d1119);border-right:1px solid var(--ferreto-border,#21262d);overflow-y:auto;padding:14px 10px;display:flex;flex-direction:column;gap:2px;}
+.gdi-central-sidebar::-webkit-scrollbar{width:6px;}
+.gdi-central-sidebar::-webkit-scrollbar-thumb{background:var(--ferreto-border,#21262d);border-radius:3px;}
+.gdi-central-sidebar-group{margin-top:14px;padding:0 8px;}
+.gdi-central-sidebar-group:first-child{margin-top:0;}
+.gdi-central-sidebar-label{font-size:10px;font-weight:700;color:var(--ferreto-text-faint,#6b7488);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;padding:0 8px;}
+.gdi-central-tab{display:flex;align-items:center;gap:10px;background:none;border:0;color:var(--ferreto-text-muted,#8b949e);padding:9px 12px;cursor:pointer;font-size:13px;border-radius:8px;transition:all .15s;font-family:var(--ferreto-font-body,'Rubik',sans-serif);width:100%;text-align:left;}
+.gdi-central-tab:hover{background:var(--ferreto-surface-2,rgba(255,255,255,.05));color:var(--ferreto-text,#f0f6fc);}
+.gdi-central-tab.active{background:linear-gradient(135deg,rgba(255,139,159,.18),rgba(93,222,218,.08));color:var(--ferreto-text,#f0f6fc);box-shadow:inset 0 0 0 1px rgba(255,139,159,.25);}
+.gdi-central-tab i{font-size:15px;width:18px;text-align:center;flex-shrink:0;}
+.gdi-central-tab.active i{color:var(--ferreto-primary,#ff8b9f);}
+.gdi-central-tab .gdi-tab-badge{margin-left:auto;background:var(--ferreto-primary,#ff8b9f);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;min-width:18px;text-align:center;}
+/* Body */
+.gdi-central-body{flex:1;overflow-y:auto;padding:24px;color:var(--ferreto-text,#f0f6fc);animation:gdi-tab-in .2s ease;}
+@keyframes gdi-tab-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.gdi-central-body::-webkit-scrollbar{width:8px;}
+.gdi-central-body::-webkit-scrollbar-thumb{background:var(--ferreto-border,#21262d);border-radius:4px;}
+.gdi-central-body::-webkit-scrollbar-thumb:hover{background:var(--ferreto-border-strong,#30363d);}
+/* Course cards — modernos */
+.gdi-courses{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
+.gdi-course{background:linear-gradient(135deg,var(--ferreto-surface-2,rgba(255,255,255,.04)),rgba(255,255,255,.02));border:1px solid var(--ferreto-border,#21262d);border-radius:16px;padding:18px;transition:all .2s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden;}
+.gdi-course::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--ferreto-grad);opacity:0;transition:opacity .2s;}
+.gdi-course:hover{border-color:rgba(255,139,159,.3);transform:translateY(-3px);box-shadow:0 12px 32px -8px rgba(0,0,0,.4);}
+.gdi-course:hover::before{opacity:1;}
+.gdi-course b{color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-weight:600;}
 .gdi-course small{color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin:6px 0 12px;}
-.heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,10px);gap:3px;width:max-content;}
-.heat i{width:10px;height:10px;border-radius:2px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));display:block;}
+/* Stats grid no card de curso */
+.gdi-course-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0;}
+.gdi-course-stat{background:var(--ferreto-surface-3,rgba(255,255,255,.04));border-radius:8px;padding:8px 6px;text-align:center;}
+.gdi-course-stat-num{font-size:18px;font-weight:700;color:var(--ferreto-text,#f0f6fc);display:block;font-family:var(--ferreto-font-display,'Poppins',sans-serif);}
+.gdi-course-stat-label{font-size:9px;color:var(--ferreto-text-muted,#8b949e);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;display:block;}
+/* Progress bar */
+.gdi-progress-bar{height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;margin:10px 0;}
+.gdi-progress-fill{height:100%;background:var(--ferreto-grad);border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1);}
+/* Botão Continuar — CTA principal */
+.gdi-btn-continue{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:10px;background:var(--ferreto-grad);color:#fff;border:0;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--ferreto-font-body,'Rubik',sans-serif);transition:all .15s;}
+.gdi-btn-continue:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 6px 18px -4px var(--ferreto-glow);}
+.gdi-btn-continue:disabled{opacity:.5;cursor:default;filter:none;transform:none;box-shadow:none;}
+.gdi-btn-continue.gdi-btn-done{background:rgba(63,185,80,.15);color:#3fb950;border:1px solid rgba(63,185,80,.3);}
+/* Empty state melhorado */
+.gdi-empty-state{padding:60px 20px;text-align:center;}
+.gdi-empty-state-icon{font-size:64px;line-height:1;margin-bottom:16px;opacity:.5;display:block;}
+.gdi-empty-state h3{color:var(--ferreto-text,#f0f6fc);font-size:18px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);margin:0 0 8px;font-weight:600;}
+.gdi-empty-state p{color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0 0 20px;line-height:1.6;max-width:400px;margin-left:auto;margin-right:auto;}
+/* Dashboard hero (Início) */
+.gdi-dashboard-hero{background:linear-gradient(135deg,rgba(255,139,159,.12),rgba(93,222,218,.08));border:1px solid var(--ferreto-border,#21262d);border-radius:18px;padding:24px;margin-bottom:20px;position:relative;overflow:hidden;}
+.gdi-dashboard-hero::after{content:'';position:absolute;top:-50%;right:-20%;width:60%;height:200%;background:radial-gradient(ellipse,rgba(255,139,159,.08),transparent 70%);pointer-events:none;}
+.gdi-dashboard-hero h2{color:var(--ferreto-text,#f0f6fc);font-size:22px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);margin:0 0 6px;font-weight:700;}
+.gdi-dashboard-hero p{color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0;}
+.gdi-dashboard-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px;}
+.gdi-dashboard-card{background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:16px;cursor:pointer;transition:all .2s;}
+.gdi-dashboard-card:hover{border-color:rgba(255,139,159,.3);transform:translateY(-2px);}
+.gdi-dashboard-card-icon{font-size:28px;display:block;margin-bottom:8px;}
+.gdi-dashboard-card-num{font-size:24px;font-weight:700;color:var(--ferreto-text,#f0f6fc);font-family:var(--ferreto-font-display,'Poppins',sans-serif);display:block;}
+.gdi-dashboard-card-label{font-size:11px;color:var(--ferreto-text-muted,#8b949e);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;display:block;}
+.gdi-dashboard-card-meta{font-size:11px;color:var(--ferreto-text-faint,#6b7488);margin-top:6px;display:block;}
+/* Quick actions */
+.gdi-quick-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.gdi-quick-action{display:flex;align-items:center;gap:6px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text,#e6edf3);padding:10px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-family:var(--ferreto-font-body,'Rubik',sans-serif);transition:all .15s;}
+.gdi-quick-action:hover{background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-color:rgba(255,139,159,.3);transform:translateY(-1px);}
+.gdi-quick-action i{color:var(--ferreto-primary,#ff8b9f);}
+/* Heatmap */
+.heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,11px);gap:3px;width:max-content;}
+.heat i{width:11px;height:11px;border-radius:3px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));display:block;transition:transform .15s;}
+.heat i:hover{transform:scale(1.4);}
 .heat i.l1{background:#0e4429}.heat i.l2{background:#006d32}.heat i.l3{background:#26a641}.heat i.l4{background:#39d353}
 .gdi-fc{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:14px;padding:26px 20px;min-height:170px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;max-width:560px;margin:0 auto;}
+/* Responsive */
+@media(max-width:768px){
+  .gdi-central-sidebar{width:60px;padding:10px 6px;}
+  .gdi-central-sidebar-group{padding:0 4px;}
+  .gdi-central-sidebar-label{display:none;}
+  .gdi-central-tab{padding:9px 8px;justify-content:center;}
+  .gdi-central-tab span,.gdi-central-tab .gdi-tab-badge{display:none;}
+  .gdi-central-stats{display:none;}
+  .gdi-central-head{padding:12px 14px;gap:10px;}
+  .gdi-central-body{padding:16px;}
+  .gdi-courses{grid-template-columns:1fr;}
+  .gdi-course-stats{grid-template-columns:repeat(2,1fr);}
+}
 `;document.head.appendChild(s);
   }
   // ★ Central de Estudos agora é uma ABA na navbar (não mais flutuante).
