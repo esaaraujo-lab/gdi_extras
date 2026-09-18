@@ -24,11 +24,15 @@
 (function(){
   'use strict';
 
-  // ★ URL base para os módulos — pode ser relativa (mesmo domínio do worker)
-  // ou absoluta (CDN diferente). Para usar CDN, mude BASE_URL.
-  // Ex: const BASE_URL = 'https://c.urso.workers.dev/extras/';
-  //      const BASE_URL = 'https://cdn.jsdelivr.net/gh/user/repo@main/extras/';
-  const BASE_URL = '/extras/';  // serve do próprio worker
+  // ★ URL base para os módulos.
+  // Estamos servindo via jsdelivr CDN (GitHub):
+  //   https://cdn.jsdelivr.net/gh/esaaraujo-lab/index@refs/heads/main/2.5.9/src/gdi_fer/modular/
+  //
+  // Para servir do próprio worker, mude para:
+  //   const BASE_URL = '/extras/';
+  //
+  // Para servir de outro CDN, ajuste a URL.
+  const BASE_URL = 'https://cdn.jsdelivr.net/gh/esaaraujo-lab/index@refs/heads/main/2.5.9/src/gdi_fer/modular/';
 
   // Ordem de carregamento (respeita dependências):
   //   1. gdi-core.js PRIMEIRO (define window.GDI_MODULES, Bus, showToast)
