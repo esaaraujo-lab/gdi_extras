@@ -11,10 +11,11 @@
   // ★★★ URL BASE DOS MÓDULOS ★★★
   // Repo: github.com/esaaraujo-lab/gdi_extras
   // Pasta: /modular/ (contém os 5 módulos + este loader)
-  const BASE_URL = 'https://raw.githubusercontent.com/esaaraujo-lab/gdi_extras/refs/heads/main/modular/';
+const BASE_URL = 'https://raw.githack.com/esaaraujo-lab/gdi_extras/main/modular/';
+const CACHE_VERSION = Date.now(); // Gera uma versão nova a cada refresh
 
   // ★ Cache-buster: bump este número a cada publicação para forçar refresh
-  const CACHE_VERSION = '3';
+//  const CACHE_VERSION = '3';
 
   const MODULES = [
     'gdi-core.js',     // obrigatoriamente primeiro
