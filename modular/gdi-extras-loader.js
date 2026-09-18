@@ -32,7 +32,7 @@
   //   const BASE_URL = '/extras/';
   //
   // Para servir de outro CDN, ajuste a URL.
-  const BASE_URL = 'https://cdn.jsdelivr.net/gh/esaaraujo-lab/index@refs/heads/main/2.5.9/src/gdi_fer/modular/';
+  const BASE_URL = 'https://cdn.jsdelivr.net/gh/esaaraujo-lab/gdi_extras@refs/heads/main/modular/';
 
   // Ordem de carregamento (respeita dependências):
   //   1. gdi-core.js PRIMEIRO (define window.GDI_MODULES, Bus, showToast)
