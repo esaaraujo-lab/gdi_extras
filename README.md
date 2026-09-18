@@ -4,13 +4,13 @@ Este guia explica como publicar o GDI Extras no Cloudflare Workers em **3 nívei
 
 ---
 
-## 📦 O que você tem agora em `/download/`
+## 📦 O que você tem agora em `/download/` Apos Baixar este Repo
 
 ```
 download/
 ├── app.min.js              ← core do app (jQuery, rotas, file viewer)
 ├── gdi-extras.js           ← MONOLITO (6.259 linhas, 358 KB) — versão atual em produção
-├── worker (4).js           ← Cloudflare Worker (rotas, auth, Drive API, Meggy proxy)
+├── worker.js               ← Cloudflare Worker (rotas, auth, Drive API, Meggy proxy)
 ├── modular/                ← VERSÃO MODULARIZADA (Nível 1)
 │   ├── gdi-extras-loader.js   ← loader (carrega os 5 módulos)
 │   ├── gdi-core.js            ← bootstrap + M1-M7 + M9 (47 KB)
@@ -23,12 +23,12 @@ download/
 
 ---
 
-## 🟢 NÍEL 0 — Monolito (atual, sem mudança)
+## 🟢 NÍEL 0 — Monolito (Dois monolitos completos)
 
-Você já está fazendo isso. Funciona, mas cada mudança = republish de 358 KB.
+Funciona, mas cada mudança = republish de 358 KB.
 
-### Como está hoje no worker
-O worker serve o `gdi-extras.js` direto. Procure no `worker (4).js` por algo como:
+### Como funciona isso no worker
+O worker serve o `gdi-extras.js` direto. Procure no `worker.js` por algo como:
 
 ```js
 const CUSTOM_APP_SOURCES = [
@@ -101,13 +101,13 @@ Pronto — os 6 arquivos ficam acessíveis em:
 
 **Opção B: Servir via GitHub + jsdelivr CDN (gratuito, com cache global)**
 
-1. Crie um repositório público no GitHub (ex: `esaaraujo-lab/gdi-extras`)
+1. Crie um repositório público no GitHub (ex: `seu-nome/gdi-extras`)
 2. Suba a pasta `modular/` inteira na branch `main`
 3. O jsdelivr serve automaticamente:
-   - `https://cdn.jsdelivr.net/gh/esaaraujo-lab/gdi-extras@main/modular/gdi-extras-loader.js`
+   - `https://cdn.jsdelivr.net/gh/seu-nome/gdi-extras@main/modular/gdi-extras-loader.js`
 4. No `gdi-extras-loader.js`, mude `BASE_URL`:
    ```js
-   const BASE_URL = 'https://cdn.jsdelivr.net/gh/esaaraujo-lab/gdi-extras@main/modular/';
+   const BASE_URL = 'https://cdn.jsdelivr.net/gh/seu-nome/gdi-extras@main/modular/';
    ```
 5. Commit → push → jsdelivr atualiza em ~5 min (ou force purge em https://purge.jsdelivr.net)
 
@@ -138,7 +138,7 @@ O loader injeta os 5 `<script>` tags automaticamente na ordem correta.
 
 #### Passo 3 — Testar
 
-1. Acesse `https://c.urso.workers.dev/`
+1. Acesse `https://seu_workers.workers.dev/`
 2. Abra DevTools → Network → filtre por "gdi-"
 3. Deve ver 6 requests (loader + 5 módulos), todos 200 OK
 4. Console deve mostrar:
@@ -179,15 +179,15 @@ Converte cada módulo para ES module com `import`/`export`. Exige mudar a forma 
 
 ### COMO NÃO É (esclarecimento importante)
 
-Você perguntou: *"é só pegar o workers.js e colar na?"*
+FAQ: *"é só pegar o workers.js e colar no cloudflare?"*
 
-**NÃO.** ES modules no `worker (4).js` é uma coisa — ES modules no `gdi-extras.js` é outra completamente diferente.
+**NÃO.** ES modules no `worker.js` é uma coisa — ES modules no `gdi-extras.js` é outra completamente diferente.
 
 #### O `worker (4).js` JÁ PODE usar ES modules nativamente
 O Cloudflare Workers suporta ES modules desde 2023. Hoje seu worker usa `addEventListener('fetch', ...)` (formato antigo Service Worker). Para migrar para ES modules:
 
 ```js
-// ANTES (formato atual do seu worker)
+// ANTES (formato  do  worker)
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request, event));
 });
@@ -238,7 +238,7 @@ export async function callIsa(prompt){ /* ... */ }
 - ✅ Quando quiser build system (Rollup/Vite) com source maps
 - ✅ Quando o projeto crescer além de ~10 mil linhas
 
-### Para o SEU caso agora: NÃO FAÇA Nível 2 ainda
+### Para o SEU caso se for novato: NÃO FAÇA Nível 2 ainda
 
 Razões:
 1. O `app.min.js` é jQuery-base (não-module) — não consegue `import` direto
@@ -250,7 +250,7 @@ Razões:
 
 ---
 
-## 🚀 Plano de migração recomendado
+## 🚀 Plano de implantação recomendado
 
 ### Semana 1 — Preparar
 1. ✅ Testar os 5 arquivos modulares localmente (já feitos em `/download/modular/`)
@@ -326,9 +326,9 @@ R: ✅ Cloudflare serve HTTP/3 por padrão. Ainda melhor que HTTP/2 para paralel
 
 ## 📞 Suporte
 
-Se algo quebrar na migração, me mande:
+Se algo quebrar na migração, de um google - GPT:
 1. Print do Console do DevTools (errors em vermelho)
 2. Print do Network → filtre por "gdi-"
 3. URL do worker de teste
 
-Que eu te ajudo a debugar.
+
