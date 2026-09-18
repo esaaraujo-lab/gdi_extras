@@ -26,6 +26,8 @@
   const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
   const fmtDate=ds=>{try{return new Date(ds+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})}catch(_){return ds}};
   const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  // ★ Fisher-Yates shuffle (substitui o biased Math.random()-.5 sort)
+  function fisherYates(arr){const a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 
   // ── Banco de questões ──
   const questions=()=>lsGet(LQ,[]);
@@ -98,7 +100,19 @@
     const qs=questions();
     const due=dueQ().length;
     const err=errQ().length;
+    // ★ Hero state convidativo quando vazio / poucas questões
+    const hero=qs.length<3?`<div class="gdi-dashboard-hero" style="background:linear-gradient(135deg,rgba(255,139,159,.10),rgba(93,222,218,.06));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:16px;padding:24px 22px;margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <div style="font-size:42px;">📝</div>
+          <div style="flex:1;min-width:240px;">
+            <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:18px;">Comece seu banco de questões</h3>
+            <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0;line-height:1.5;">Gere questões a partir das aulas que você assistiu em <b>Meus Cursos</b>, ou adicione manualmente. A Meggy cria questões comentadas com <b>fundamentação legal</b> e <b>explicação do erro/acerto</b>.</p>
+          </div>
+          <button id="hero-gen" class="gdi-btn gdi-btn-primary" style="font-size:13px;"><i class="bi bi-stars"></i> Gerar agora</button>
+        </div>
+      </div>`:'';
     box.innerHTML=`
+      ${hero}
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
         <b style="color:var(--ferreto-text,#f0f6fc);">${qs.length} questões</b>
         ${due?`<span style="color:var(--ferreto-primary,#ff8b9f);font-size:12px;">${due} p/ revisar hoje</span>`:''}
@@ -161,6 +175,9 @@
     drawSubjects();
     drawList();
 
+    // ★ hero CTA
+    const heroBtn=box.querySelector('#hero-gen');
+    if(heroBtn)heroBtn.onclick=()=>openGen(box,drawList);
     box.querySelector('#gdi-q-resolve-due').onclick=()=>startSession(box,dueQ(),'Revisões de hoje');
     box.querySelector('#gdi-q-resolve-err').onclick=()=>startSession(box,errQ(),'Caderno de erros');
     box.querySelector('#gdi-q-gen').onclick=()=>openGen(box,drawList);
@@ -373,10 +390,18 @@
   window.renderSimulado=function(box){
     const qs=questions();
     const sims=simus().slice().reverse();
+    // lista cursos do aluno para filtrar questões por curso
+    const courses=collectCourses();
+    const courseNames=courses.map(c=>{const seg=c.key.split('/');return seg.length>1?seg.slice(1).join('/'):c.key;});
     box.innerHTML=`
       <div style="margin-bottom:18px;">
         <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Montar simulado</h4>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Curso:</label>
+          <select id="sim-course" style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#e6edf3);padding:5px 8px;font-size:12px;max-width:260px;">
+            <option value="">Todos os cursos</option>
+            ${courseNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+          </select>
           <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Questões:</label>
           <input id="sim-n" type="number" min="5" max="50" value="10" style="width:64px;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#e6edf3);padding:5px;text-align:center;font-size:12px;">
           <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Tempo (min):</label>
@@ -384,6 +409,7 @@
           <button id="sim-go" class="gdi-btn gdi-btn-primary" style="font-size:12px;" ${qs.length>=5?'':'disabled'}><i class="bi bi-play-fill"></i> Iniciar simulado</button>
         </div>
         ${qs.length<5?'<p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:8px;">Adicione ao menos 5 questões (gerar com a Meggy ou importar).</p>':''}
+        <p style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:8px;">O simulado usa questões dos cursos matriculados (Meus Cursos) + questões de outros alunos da mesma matéria, quando disponíveis.</p>
       </div>
       <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:18px 0 8px;">Histórico</h4>
       <div id="sim-hist" style="display:flex;flex-direction:column;gap:6px;max-width:760px;"></div>
@@ -392,9 +418,30 @@
       box.querySelector('#sim-go').onclick=()=>{
         const n=Math.min(parseInt(box.querySelector('#sim-n').value,10)||10,qs.length);
         const mins=parseInt(box.querySelector('#sim-time').value,10)||30;
-        // embaralha e pega N
-        const shuffled=[...qs].sort(()=>Math.random()-0.5).slice(0,n);
-        startSimulado(box,shuffled,mins);
+        const courseFilter=box.querySelector('#sim-course').value;
+        // filtra por curso (subject/path) quando selecionado
+        let pool=qs;
+        if(courseFilter){
+          pool=qs.filter(q=>(q.subject&&q.subject.includes(courseFilter))||(q.path&&q.path.includes(courseFilter)));
+          if(pool.length<5){showToast('Poucas questões deste curso — usando todas');pool=qs;}
+        }
+        // tenta enriquecer com questões compartilhadas por outros alunos da mesma matéria
+        if(window.gdiIsaPdf && window.gdiIsaPdf.fetchSharedQuestions){
+          window.gdiIsaPdf.fetchSharedQuestions(courseFilter).then(extra=>{
+            if(extra && extra.length){
+              pool=[...pool,...extra];
+              showToast(pool.length+' questões disponíveis (incl. colegas)');
+            }
+            const shuffled=fisherYates(pool).slice(0,n);
+            startSimulado(box,shuffled,mins);
+          }).catch(()=>{
+            const shuffled=fisherYates(pool).slice(0,n);
+            startSimulado(box,shuffled,mins);
+          });
+        }else{
+          const shuffled=fisherYates(pool).slice(0,n);
+          startSimulado(box,shuffled,mins);
+        }
       };
     }
     const hist=box.querySelector('#sim-hist');
@@ -450,11 +497,17 @@
       const prev=box.querySelector('#sim-prev');if(prev)prev.onclick=()=>{idx--;draw();};
     }
     function finish(){
+      // ★ FIX: limpa timer imediatamente para evitar salvar simulado duplicado
+      if(box.__simTimer){clearInterval(box.__simTimer);box.__simTimer=null;}
       const dur=Math.round((Date.now()-t0)/1000);
       let hits=0;
       answers.forEach(a=>{if(a){gradeQ(a.id,a.acertou);if(a.acertou)hits++;}});
       const total=queue.length;
-      saveSim([...simus(),{id:uid(),date:Date.now(),title:'Simulado '+queue.length+'q',duration:dur,hits,misses:total-hits,total,answers:answers.map(a=>a?a.id:null)}]);
+      // anti-duplicação: se já existe salvo neste segundo, pula
+      const recent=simus().find(s=>s.date>Date.now()-2000);
+      if(!recent){
+        saveSim([...simus(),{id:uid(),date:Date.now(),title:'Simulado '+queue.length+'q',duration:dur,hits,misses:total-hits,total,answers:answers.map(a=>a?a.id:null)}]);
+      }
       const pct=Math.round(hits/total*100);
       box.innerHTML=`<div style="text-align:center;padding:30px;">
         <div style="font-size:40px;">${pct>=60?'🎉':'📚'}</div>
@@ -1273,10 +1326,13 @@
         list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-journal-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma matéria criada ainda.<br><span style="font-size:12px;">Clique em "Nova matéria" para começar.</span></div>';
         return;
       }
-      // contar cards por matéria
+      // contar cards por matéria (★ FIX: cards usam .path, não .subject)
       const cards=lsGet('gdi-cards-v1',[]);
       const countByName={};
-      cards.forEach(c=>{if(c.subject)countByName[c.subject]=(countByName[c.subject]||0)+1;});
+      cards.forEach(c=>{
+        const s=c.subject||(c.path?c.path.split('/').filter(Boolean).pop():'')||'';
+        if(s)countByName[s]=(countByName[s]||0)+1;
+      });
       list.innerHTML='';
       all.forEach(s=>{
         const count=countByName[s.name]||0;
@@ -1649,16 +1705,58 @@
       // salvar curso manual
       const LS_MANUAL='gdi-manual-courses-v1';
       const manual=lsGet(LS_MANUAL,[]);
+      const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
       manual.push({
-        id:'mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
-        name,icon:selectedIcon,color:selectedColor,
+        id:courseId,name,icon:selectedIcon,color:selectedColor,
         goal,notes,createdAt:Date.now(),
         manual:true
       });
       lsSet(LS_MANUAL,manual);
       close();
-      showToast('Curso "'+name+'" adicionado!');
+      showToast('Curso "'+name+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
       renderCursos(box);
+      // ★ BATALHÃO: dispara processamento em background para gerar resumos+questões+flashcards
+      // de TODAS as aulas/PDFs do curso. Resultados ficam no cache ISA compartilhado,
+      // beneficiando futuros alunos que adicionarem o mesmo curso.
+      try{
+        // descobre PDFs do curso via gdiListAllFiles (host API)
+        const coursePath='/0:/'+name;
+        const courseKey=coursePath;
+        const pdfs=[];
+        if(window.gdiListAllFiles){
+          try{
+            const files=await window.gdiListAllFiles(coursePath,'');
+            if(Array.isArray(files)){
+              for(const f of files){
+                if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
+                  pdfs.push({name:f.name, url:f.path||f.url, text:''});
+                }
+              }
+            }
+          }catch(_){}
+        }
+        // dispara batalhão (mesmo sem PDFs — o worker ainda pode buscar)
+        if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+          // se há PDFs, extrai texto de cada um (front) para acelerar o batalhão
+          if(pdfs.length && window.gdiIsaPdf.extractPdfText){
+            // paralelo: extrai texto de até 5 PDFs simultaneamente
+            const PARALLEL=5;
+            for(let i=0;i<pdfs.length;i+=PARALLEL){
+              const chunk=pdfs.slice(i,i+PARALLEL);
+              await Promise.allSettled(chunk.map(async p=>{
+                try{
+                  if(p.url){
+                    const txt=await window.gdiIsaPdf.extractPdfText(p.url);
+                    p.text=txt.slice(0,15000);
+                  }
+                }catch(_){}
+              }));
+            }
+          }
+          // dispara!
+          await window.gdiIsaPdf.startBattalion(courseKey, coursePath, name, pdfs);
+        }
+      }catch(e){console.warn('[Batalhão] falha:',e.message);}
     };
     setTimeout(()=>overlay.querySelector('#gdi-amc-name').focus(),50);
   }
@@ -2158,11 +2256,25 @@
 .gdi-quick-action{display:flex;align-items:center;gap:6px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text,#e6edf3);padding:10px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-family:var(--ferreto-font-body,'Rubik',sans-serif);transition:all .15s;}
 .gdi-quick-action:hover{background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-color:rgba(255,139,159,.3);transform:translateY(-1px);}
 .gdi-quick-action i{color:var(--ferreto-primary,#ff8b9f);}
-/* Heatmap */
-.heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,11px);gap:3px;width:max-content;}
-.heat i{width:11px;height:11px;border-radius:3px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));display:block;transition:transform .15s;}
+/* Heatmap - largura 100% conforme solicitado */
+.heat-wrap{width:100%;overflow-x:auto;padding-bottom:6px;}
+.heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,13px);grid-template-columns:repeat(auto-fill,minmax(13px,1fr));gap:3px;width:100%;min-width:100%;}
+.heat i{width:13px;height:13px;border-radius:3px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));display:block;transition:transform .15s;}
 .heat i:hover{transform:scale(1.4);}
 .heat i.l1{background:#0e4429}.heat i.l2{background:#006d32}.heat i.l3{background:#26a641}.heat i.l4{background:#39d353}
+/* Fix dark-mode dropdowns illegíveis (Redação, etc.) */
+.gdi-central-box select, .gdi-central-box select option, .gdi-central-box optgroup {
+  color-scheme: dark light;
+  background: var(--ferreto-bg-2,#0d1119);
+  color: var(--ferreto-text,#e6edf3);
+}
+[data-bs-theme="light"] .gdi-central-box select,
+[data-bs-theme="light"] .gdi-central-box select option,
+[data-bs-theme="light"] .gdi-central-box optgroup {
+  color-scheme: light; background: #fff; color: #1f2540;
+}
+/* Z-index unificado para todos os modais */
+.gdi-modal-overlay{z-index:100000!important;}
 .gdi-fc{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:14px;padding:26px 20px;min-height:170px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;max-width:560px;margin:0 auto;}
 /* Responsive */
 @media(max-width:768px){
@@ -2361,22 +2473,49 @@
     box.querySelector('#prova-back').onclick=()=>window.renderProvas(box);
   }
 
-  // ── Render: Correção de Redação ──
+  // ── Render: Correção de Redação (repaginada + bancas de Vestibular/ENEM) ──
   window.renderRedacao=function(box){
     const corrections=lsGet('gdi-essay-corrections-v1',[]);
-    const BANCAS=['CEBRASPE (CESPE)','FGV','VUNESP','FCC','CESGRANRIO','IBFC','FUJB','OAB','TJ/SP','TRT','MPU','TRE','TCU','PF/PRF','Outra'];
+    // ★ Bancas de Concurso + ENEM + Vestibulares de Medicina
+    const BANCA_GROUPS=[
+      {label:'Concurso Público',bancas:['CEBRASPE (CESPE)','FGV','VUNESP','FCC','CESGRANRIO','IBFC','FUJB','OAB','TJ/SP','TRT','MPU','TRE','TCU','PF/PRF','Outra']},
+      {label:'ENEM',bancas:['ENEM (5 competências)']},
+      {label:'Vestibulares Medicina',bancas:['FUVEST (dissertativa)','UNICAMP','UNIFESP','USP','ENEM Med','UECE Med','UERJ Med','UNESP Med']},
+      {label:'Outros Vestibulares',bancas:['ITA','IME','UFRGS','UFPR','UFSC','UFRJ','PUC-SP','MACKENZIE']}
+    ];
+    // ★ Estilos de redação
+    const TIPOS=['Dissertativa-argumentativa','Estudo de caso','Discursiva','Narrativa','Carta argumentativa','Artigo opinativo'];
     box.innerHTML=`
-      <div style="margin-bottom:18px;">
-        <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 8px;">✍️ Correção de Redação</h3>
-        <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0 0 14px;">A Meggy corrige sua redação seguindo os critérios oficiais da banca escolhida.</p>
-        <div style="margin-bottom:12px;">
-          <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);display:block;margin-bottom:4px;">Banca:</label>
-          <select id="red-banca" style="${inp}width:auto;">
-            ${BANCAS.map(b=>`<option value="${b}">${b}</option>`).join('')}
-          </select>
+      <div style="margin-bottom:20px;padding:20px;background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.04));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:16px;">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+          <div style="font-size:34px;flex:none;">✍️</div>
+          <div style="flex:1;">
+            <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:18px;">Correção de Redação</h3>
+            <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0;line-height:1.5;">A Meggy corrige seguindo os critérios oficiais da banca. Envie o texto digitado ou uma imagem escaneada — a correção é salva em Markdown na pasta do aluno no Drive.</p>
+          </div>
         </div>
-        <textarea id="red-text" placeholder="Cole sua redação aqui..." style="${inp}min-height:200px;resize:vertical;font-family:Georgia,serif;font-size:14px;line-height:1.6;"></textarea>
-        <div style="margin-top:10px;display:flex;gap:8px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+          <div>
+            <label style="font-size:11px;color:var(--ferreto-text-muted,#8b949e);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Banca organizadora</label>
+            <select id="red-banca" class="gdi-redacao-select" style="${inp}width:100%;color-scheme:dark;">
+              ${BANCA_GROUPS.map(g=>`<optgroup label="${esc(g.label)}">${g.bancas.map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--ferreto-text-muted,#8b949e);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Tipo de redação</label>
+            <select id="red-tipo" class="gdi-redacao-select" style="${inp}width:100%;color-scheme:dark;">
+              ${TIPOS.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div id="red-dropzone" style="border:2px dashed var(--ferreto-border-strong,#30363d);border-radius:12px;padding:18px;text-align:center;cursor:pointer;transition:all .2s;background:var(--ferreto-surface-2,rgba(255,255,255,.03));margin-bottom:12px;">
+          <i class="bi bi-cloud-arrow-up" style="font-size:28px;color:var(--ferreto-text-muted,#8b949e);"></i>
+          <div style="color:var(--ferreto-text,#f0f6fc);font-size:13px;margin-top:6px;">Arraste uma imagem da redação escaneada ou <b style="color:var(--ferreto-primary,#ff8b9f);">clique para enviar</b></div>
+          <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:4px;">JPG, PNG ou PDF · A Meggy faz OCR do conteúdo</div>
+          <input type="file" id="red-file" accept="image/*,application/pdf" style="display:none;">
+        </div>
+        <textarea id="red-text" placeholder="Cole aqui sua redação (mínimo 50 caracteres)..." style="${inp}min-height:240px;resize:vertical;font-family:Georgia,serif;font-size:14px;line-height:1.6;width:100%;box-sizing:border-box;"></textarea>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           <button class="gdi-btn gdi-btn-primary" id="red-corrigir"><i class="bi bi-pencil-square"></i> Corrigir com Meggy</button>
           <span id="red-status" style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;align-self:center;"></span>
         </div>
@@ -2384,15 +2523,51 @@
       <div id="red-result"></div>
       ${corrections.length?`<h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:18px 0 8px;">Correções anteriores (${corrections.length})</h4>
       <div style="display:flex;flex-direction:column;gap:6px;">${corrections.slice().reverse().slice(0,10).map(c=>`<div class="gdi-note" style="cursor:pointer;" data-id="${c.id}">
-        <span style="flex:1;"><b style="color:var(--ferreto-text,#f0f6fc);">${esc(c.banca)}</b> · <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${new Date(c.date).toLocaleDateString('pt-BR')} · Nota: ${c.score||'—'}</span></span>
+        <span style="flex:1;"><b style="color:var(--ferreto-text,#f0f6fc);">${esc(c.banca)}</b> · <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${new Date(c.date).toLocaleDateString('pt-BR')} · Nota: ${c.score||'—'}${c.tipo? ' · '+esc(c.tipo):''}</span></span>
       </div>`).join('')}</div>`:''}
     `;
+    // ★ Drag&drop da imagem escaneada
+    const dz=box.querySelector('#red-dropzone');
+    const fileInput=box.querySelector('#red-file');
+    const statusDrop=box.querySelector('#red-status');  // ★ FIX: status estava fora de escopo
+    if(dz&&fileInput){
+      dz.onclick=()=>fileInput.click();
+      fileInput.onchange=async e=>{
+        const f=e.target.files[0];
+        if(!f)return;
+        // OCR via Tesseract.js (lazy load) ou envio direto ao worker
+        if(statusDrop)statusDrop.innerHTML='<i class="bi bi-hourglass-split"></i> Lendo imagem da redação…';
+        try{
+          if(f.type.startsWith('image/')){
+            // envia imagem direto ao worker /api/ai/redacao (que fará OCR/vision)
+            const fd=new FormData();
+            fd.append('file',f);
+            fd.append('mode','ocr');
+            const r=await fetch('/api/ai/redacao',{method:'POST',body:fd});
+            const data=await r.json();
+            if(data.ok&&data.text){
+              box.querySelector('#red-text').value=data.text;
+              if(statusDrop)statusDrop.innerHTML='<span style="color:#3fb950;"><i class="bi bi-check-circle"></i> Texto extraído da imagem ('+data.text.length+' chars). Revise antes de corrigir.</span>';
+            }else if(statusDrop){statusDrop.innerHTML='<span style="color:#ff6b6b;">Falha OCR: '+(data.error||'desconhecido')+'</span>';}
+          }else if(f.type==='application/pdf'){
+            // PDF → usa pdf.js (igual ao M9-ISA)
+            if(window.gdiIsaPdf&&window.gdiIsaPdf.extractPdfText){
+              const url=URL.createObjectURL(f);
+              const txt=await window.gdiIsaPdf.extractPdfText(url);
+              box.querySelector('#red-text').value=txt;
+              if(statusDrop)statusDrop.innerHTML='<span style="color:#3fb950;"><i class="bi bi-check-circle"></i> Texto extraído do PDF ('+txt.length+' chars).</span>';
+            }else if(statusDrop){statusDrop.innerHTML='<span style="color:#ff6b6b;">Carregue o módulo de PDFs primeiro.</span>';}
+          }
+        }catch(err){if(statusDrop)statusDrop.innerHTML='<span style="color:#ff6b6b;">Erro: '+esc(err.message)+'</span>';}
+      };
+    }
     box.querySelector('#red-corrigir').onclick=async()=>{
       const banca=box.querySelector('#red-banca').value;
+      const tipo=box.querySelector('#red-tipo').value;
       const text=box.querySelector('#red-text').value.trim();
       const status=box.querySelector('#red-status');
       const result=box.querySelector('#red-result');
-      if(!text||text.length<50){showToast('Escreva ou cole sua redação primeiro');return;}
+      if(!text||text.length<50){showToast('Escreva ou cole sua redação primeiro (mínimo 50 caracteres)');return;}
       status.innerHTML='<i class="bi bi-hourglass-split"></i> Meggy está corrigindo…';
       result.innerHTML='';
       try{
@@ -2411,22 +2586,48 @@
           'TRE':'TRE (CEBRASPE): escala 0-10. Mesmos critérios CEBRASPE.',
           'TCU':'TCU (CEBRASPE): escala 0-10. Mesmos critérios CEBRASPE.',
           'PF/PRF':'PF/PRF (CEBRASPE): escala 0-10. Mesmos critérios CEBRASPE.',
+          'ENEM (5 competências)':'ENEM usa 5 competências (0-200 cada, total 0-1000): C1 Domínio norma culta, C2 Compreensão proposta, C3 Seleção/relação/organização argumentos, C4 Coesão, C5 Proposta de intervenção. Cada erro exclui 50 pontos por competência.',
+          'FUVEST (dissertativa)':'FUVEST dissertativa escala 0-100. Critérios: conteúdo (0-50), estrutura (0-30), linguagem (0-20).',
+          'UNICAMP':'UNICAMP avalia: tema e desenvolvimento, coesão e coerência, gramática e léxico, atendimento à proposta. Escala 0-100.',
+          'UNIFESP':'UNIFESP dissertativa escala 0-100. Conteúdo, estrutura, linguagem.',
+          'USP':'USP dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
+          'ENEM Med':'ENEM + peso 5x para medicina. Critérios ENEM mas com exigência máxima.',
+          'UECE Med':'UECE dissertativa escala 0-10. Conteúdo, estrutura, linguagem.',
+          'UERJ Med':'UERJ dissertativa escala 0-100. Conteúdo, organização, linguagem.',
+          'UNESP Med':'UNESP dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
+          'ITA':'ITA dissertativa escala 0-100. Conteúdo técnico-científico, estrutura, expressão.',
+          'IME':'IME dissertativa técnica. Conteúdo, estrutura, expressão. Escala 0-100.',
+          'UFRGS':'UFRGS dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
+          'UFPR':'UFPR dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
+          'UFSC':'UFSC dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
+          'UFRJ':'UFRJ dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
+          'PUC-SP':'PUC-SP dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
+          'MACKENZIE':'MACKENZIE dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
           'Outra':'Critérios gerais de concurso público brasileiro.'
         };
         const criterios=bancaInfo[banca]||bancaInfo['Outra'];
-        const resp=await callMeggy('Corrija esta redação de concurso público (banca: '+banca+'). CRITÉRIOS DESTA BANCA: '+criterios+'. Avalie cada critério com nota de 0 a 10 + nota geral + comentários detalhados ponto por ponto + sugestões de melhoria + versão reescrita de trechos problemáticos. Formato Markdown com ## seções:\n\nREDAÇÃO:\n'+text);
-        // extrai nota geral (procura "Nota geral:" ou "Nota: X")
-        const scoreMatch=resp.match(/nota\s*geral\s*:?\s*(\d+[,.]?\d*)/i)||resp.match(/nota\s*:?\s*(\d+[,.]?\d*)/i);
+        const prompt='Você é um corretor de redações experiente. Corrija esta redação de banca: '+banca+' ('+tipo+').\n\nCRITÉRIOS DESTA BANCA: '+criterios+'\n\nINSTRUÇÕES:\n1. Avalie cada critério da banca com nota parcial (0-10 ou 0-200 conforme ENEM).\n2. Dê uma NOTA GERAL final.\n3. Para cada parágrafo, identifique: (a) problemas de conteúdo, (b) problemas gramaticais com a regra violada, (c) problemas de estrutura/coesão.\n4. Cite o trecho exato do aluno, depois comente.\n5. Dê sugestões concretas de reescrita.\n6. Identifique o tipo de redação automaticamente se foi marcado errado.\n7. Comente sobre adequação ao tema, argumentação, coesão, coerência, norma culta.\n\nFORMATO Markdown com seções ## :\n- ## Nota Geral: X/10\n- ## Avaliação por Critério\n- ## Comentários por Parágrafo (com citação)\n- ## Pontos Fortes\n- ## Pontos Fracos\n- ## Sugestões de Melhoria\n- ## Versão Reescrita\n\nREDAÇÃO DO ALUNO ('+text.length+' caracteres, banca '+banca+', tipo declarado: '+tipo+'):\n\n'+text;
+        const resp=await callMeggy(prompt);
+        const scoreMatch=resp.match(/nota\s*geral\s*:?\s*(\d+[,.]?\d*)\s*(?:\/\s*(\d+))?/i)||resp.match(/nota\s*:?\s*(\d+[,.]?\d*)/i);
         const score=scoreMatch?scoreMatch[1]:'—';
-        const correction={id:uid(),banca,date:Date.now(),text:text.slice(0,2000),correction:resp,score};
+        const correction={id:uid(),banca,tipo,date:Date.now(),text:text.slice(0,4000),correction:resp,score};
         const corr=lsGet('gdi-essay-corrections-v1',[]);
         corr.push(correction);
         lsSet('gdi-essay-corrections-v1',corr);
+        // ★ Salva versão MD da prova com correção no Drive do aluno
+        try{
+          const md='---\n'+'banca: "'+banca+'"\n'+'tipo: "'+tipo+'"\n'+'data: '+new Date().toISOString()+'\n'+'score: '+score+'\n'+'---\n\n# Redação Corrigida\n\n## Redação Original\n\n'+text+'\n\n## Correção da Meggy\n\n'+resp+'\n';
+          if(window.gdiIsaPdf&&window.gdiIsaPdf.saveEssayMD){
+            await window.gdiIsaPdf.saveEssayMD(md,banca,tipo,score);
+            showToast('Redação corrigida! Nota: '+score+' · MD salvo no Drive');
+          }else{
+            showToast('Redação corrigida! Nota: '+score);
+          }
+        }catch(_){showToast('Redação corrigida! Nota: '+score);}
         status.innerHTML='';
         result.innerHTML=`<div class="gdi-isa-summary-body" style="background:var(--ferreto-surface-2,rgba(255,255,255,.03));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:20px;color:var(--ferreto-text,#e6edf3);font-size:14px;line-height:1.8;margin-top:14px;">
           ${renderMd(resp)}
         </div>`;
-        showToast('Redação corrigida! Nota: '+score);
       }catch(e){
         status.innerHTML='<span style="color:#ff6b6b;">Erro: '+esc(e.message)+'</span>';
       }
@@ -2436,6 +2637,7 @@
         const c=corrections.find(x=>x.id===el.dataset.id);
         if(c){
           box.querySelector('#red-banca').value=c.banca;
+          if(c.tipo&&box.querySelector('#red-tipo'))box.querySelector('#red-tipo').value=c.tipo;
           box.querySelector('#red-text').value=c.text;
           box.querySelector('#red-result').innerHTML=`<div class="gdi-isa-summary-body" style="background:var(--ferreto-surface-2,rgba(255,255,255,.03));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:20px;color:var(--ferreto-text,#e6edf3);font-size:14px;line-height:1.8;margin-top:14px;">${renderMd(c.correction)}</div>`;
         }
@@ -2443,7 +2645,7 @@
     });
   };
 
-  // ── Render: Radar de fracos (SVG) ──
+  // ── Render: Mapa de Fracos (tiles retangulares ligados a Meus Cursos) ──
   window.renderRadar=function(box){
     // coleta dados de questões por assunto
     const qs=lsGet('gdi-questions-v1',[]);
@@ -2451,68 +2653,92 @@
     const bySubject={};
     qs.forEach(q=>{
       const s=q.subject||'Geral';
-      if(!bySubject[s])bySubject[s]={total:0,correct:0,wrong:0};
+      if(!bySubject[s])bySubject[s]={total:0,correct:0,wrong:0,paths:new Set()};
       bySubject[s].total++;
+      if(q.path)bySubject[s].paths.add(q.path);
       const st=srs[q.id];
       if(st){
         if(st.box>0)bySubject[s].correct++;
         else bySubject[s].wrong++;
       }
     });
-    const subjects=Object.entries(bySubject).filter(([,v])=>v.total>=1).sort((a,b)=>b[1].total-a[1].total).slice(0,8);
+    // enriquece com aulas menos estudadas do cronograma
+    const cron=lsGet('gdi-cronograma-v1',null);
+    const aulasMenosEstudadas=[];
+    if(cron&&Array.isArray(cron.plan)){
+      cron.plan.forEach(t=>{if(t&&t.name&&t.type==='study')aulasMenosEstudadas.push(t.name);});
+    }
+    // trilhas criadas pelo aluno
+    const trails=window.gdiTrails?window.gdiTrails.get():[];
+    // cursos do aluno (Meus Cursos)
+    const courses=collectCourses();
+    const subjects=Object.entries(bySubject).filter(([,v])=>v.total>=1).sort((a,b)=>b[1].total-a[1].total);
     if(!subjects.length){
-      box.innerHTML='<div class="gdi-notes-empty">Resolva algumas questões para ver seu mapa de fracos.</div>';
+      box.innerHTML=`<div class="gdi-notes-empty" style="padding:60px 20px;text-align:center;">
+        <i class="bi bi-bullseye" style="font-size:48px;display:block;margin-bottom:12px;color:var(--ferreto-text-faint,#6b7488);"></i>
+        Resolva algumas questões para ver seu mapa de fracos.<br>
+        <span style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Gere questões em Meus Cursos → Resumos / Questões / Pílulas.</span>
+      </div>`;
       return;
     }
-    // SVG radar
-    const size=300,cx=150,cy=150,maxR=110;
-    const n=subjects.length;
-    const angle=i=>(-Math.PI/2)+(i*2*Math.PI/n);
-    const pt=(r,i)=>[cx+r*Math.cos(angle(i)),cy+r*Math.sin(angle(i))];
-    // grid (5 anéis)
-    let grid='';
-    for(let r=1;r<=5;r++){
-      const rr=maxR*r/5;
-      const pts=Array.from({length:n},(_,i)=>pt(rr,i).join(',')).join(' ');
-      grid+=`<polygon points="${pts}" fill="none" stroke="var(--ferreto-border,#30363d)" stroke-width="1" opacity="${0.3+r*0.1}"/>`;
-    }
-    // eixos
-    let axes='';
-    subjects.forEach(([,],i)=>{const [x,y]=pt(maxR,i);axes+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--ferreto-border,#30363d)" stroke-width="1" opacity=".3"/>`;});
-    // dados
-    let dataPts='';
-    let labels='';
-    subjects.forEach(([subj,v],i)=>{
-      const acc=v.total>0?(v.correct/v.total):0;
-      const r=maxR*Math.max(0.1,1-acc); // quanto menor acerto, mais pra fora (pior)
-      const [x,y]=pt(r,i);
-      dataPts+=`${x},${y} `;
-      // label
-      const [lx,ly]=pt(maxR+22,i);
-      const short=subj.length>18?subj.slice(0,16)+'…':subj;
-      const color=acc<0.5?'#ff6b6b':acc<0.7?'#ffd43b':'#3fb950';
-      labels+=`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="9" fill="${color}">${esc(short)}</text>`;
-      labels+=`<text x="${lx}" y="${ly+10}" text-anchor="middle" font-size="8" fill="var(--ferreto-text-muted,#8b949e)">${Math.round(acc*100)}%</text>`;
-    });
     const weakSubjects=subjects.filter(([,v])=>v.total>0&&(v.correct/v.total)<0.6).sort((a,b)=>(a[1].correct/a[1].total)-(b[1].correct/b[1].total));
-    box.innerHTML=`<div style="max-width:760px;">
-      <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;">🎯 Mapa de Fracos</h3>
-      <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0 0 16px;">Quanto mais pra fora, pior seu desempenho. Foque nas áreas vermelhas.</p>
-      <div style="display:flex;justify-content:center;margin-bottom:20px;">
-        <svg width="${size}" height="${size}" style="max-width:100%;">
-          ${grid}${axes}
-          <polygon points="${dataPts.trim()}" fill="rgba(255,139,159,.2)" stroke="var(--ferreto-primary,#ff8b9f)" stroke-width="2"/>
-          ${dataPts.trim().split(' ').map(p=>{const[x,y]=p.split(',');return `<circle cx="${x}" cy="${y}" r="3" fill="var(--ferreto-primary,#ff8b9f)"/>`;}).join('')}
-          ${labels}
-        </svg>
-      </div>
-      ${weakSubjects.length?`<div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);border-radius:12px;padding:14px;margin-bottom:14px;">
-        <b style="color:#ff8b8b;">⚠️ Foque em:</b>
-        <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
-          ${weakSubjects.map(([s,v])=>`<span style="color:var(--ferreto-text,#e6edf3);font-size:13px;">• ${esc(s)} — ${Math.round(v.correct/v.total*100)}% de acerto (${v.correct}/${v.total})</span>`).join('')}
+    // tiles retangulares
+    const tileColor=acc=>acc<0.4?'#ff6b6b':acc<0.6?'#ffd43b':acc<0.8?'#3fb950':'#1a7f37';
+    const tiles=subjects.map(([s,v])=>{
+      const acc=v.total>0?(v.correct/v.total):0;
+      const pct=Math.round(acc*100);
+      const c=tileColor(acc);
+      // ★ FIX: co estava fora do escopo do find() — agora referenciado corretamente
+      let linkedKey=null;
+      for(const co of courses){const seg=co.key.split('/');if(seg.length>1&&s.includes(seg[seg.length-1])){linkedKey=co.key;break;}}
+      return `<div class="gdi-course" data-subject="${esc(s)}" ${linkedKey?`data-course-key="${esc(linkedKey)}"`:''} style="cursor:pointer;display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-left:4px solid ${c};">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s)}</b>
+          <span style="font-size:18px;font-weight:700;color:${c};font-variant-numeric:tabular-nums;">${pct}%</span>
         </div>
-      </div>`:'<div style="background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.3);border-radius:12px;padding:14px;"><b style="color:#3fb950;">✓ Bom desempenho geral!</b> Nenhuma matéria com taxa de acerto abaixo de 60%.</div>'}
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${v.correct} acertos · ${v.wrong} erros · ${v.total} total</span>
+          ${linked?'<span style="color:var(--ferreto-primary,#ff8b9f);font-size:10px;"><i class=\"bi bi-link-45deg\"></i> Meus Cursos</span>':''}
+        </div>
+        <div style="height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${c};border-radius:3px;transition:width .3s;"></div>
+        </div>
+      </div>`;
+    }).join('');
+    box.innerHTML=`<div>
+      <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">🎯 Mapa de Fracos</h3>
+      <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0 0 16px;line-height:1.5;">Clique em um tile para abrir as questões daquela matéria. Foque nas áreas em <b style="color:#ff6b6b;">vermelho</b> (acerto < 40%) e <b style="color:#ffd43b;">amarelo</b> (40-60%).</p>
+      ${weakSubjects.length?`<div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);border-radius:12px;padding:14px 16px;margin-bottom:16px;">
+        <b style="color:#ff8b8b;font-size:13px;"><i class="bi bi-exclamation-triangle-fill"></i> Foque em:</b>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
+          ${weakSubjects.map(([s,v])=>`<span style="color:var(--ferreto-text,#e6edf3);font-size:13px;">• <b>${esc(s)}</b> — ${Math.round(v.correct/v.total*100)}% de acerto (${v.correct}/${v.total})${v.paths.size?` · <span style=\"color:var(--ferreto-text-muted,#8b949e);font-size:11px;\">${v.paths.size} aula(s)</span>`:''}</span>`).join('')}
+        </div>
+      </div>`:'<div style="background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.3);border-radius:12px;padding:14px 16px;margin-bottom:16px;"><b style="color:#3fb950;"><i class="bi bi-check-circle-fill"></i> Bom desempenho geral!</b> Nenhuma matéria com taxa de acerto abaixo de 60%.</div>'}
+      ${aulasMenosEstudadas.length?`<div style="background:rgba(255,212,59,.08);border:1px solid rgba(255,212,59,.3);border-radius:12px;padding:14px 16px;margin-bottom:16px;">
+        <b style="color:#ffd43b;font-size:13px;"><i class="bi bi-book-half"></i> Aulas menos estudadas no cronograma:</b>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+          ${aulasMenosEstudadas.slice(0,5).map(n=>`<span style="color:var(--ferreto-text,#e6edf3);font-size:12px;">• ${esc(n)}</span>`).join('')}
+        </div>
+      </div>`:''}
+      ${trails.length?`<div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:8px;"><i class="bi bi-signpost-2"></i> ${trails.length} trilha(s) criada(s) — vincule matérias fracas a uma trilha para estudar com foco.</div>`:''}
+      <div class="gdi-courses" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+        ${tiles}
+      </div>
     </div>`;
+    // clique no tile → abrir Questões filtradas
+    box.querySelectorAll('[data-subject]').forEach(el=>{
+      el.onclick=()=>{
+        // navega para Questões e aplica filtro de subject
+        const subj=el.dataset.subject;
+        const panel=document.getElementById('gdi-central');
+        if(panel){
+          const t=panel.querySelector('.gdi-central-tab[data-t=\"questoes\"]');
+          if(t)t.click();
+          // tenta aplicar filtro depois que Questões renderiza
+          setTimeout(()=>{try{_qFilterSubject=subj;const b=panel.querySelector('#gdi-q-subjects');if(b){const ev=new Event('click');}}catch(_){}},200);
+        }
+      };
+    });
   };
 
   console.log('[GDI Extras] M24 Estudo Avançado (provas/redação/radar) ativo');

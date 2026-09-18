@@ -466,9 +466,16 @@
   }
 
   // ── Render Markdown (uses marked if available, fallback to <br>) ──
-  // ★ XSS-safe: sempre passa por gdiSanitize (DOMPurify)
+  // ★ XSS-safe: NUNCA retorna HTML não sanitizado — fallback sempre escapa
   function renderMd(txt){
-    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
+    if(window.marked){
+      try{
+        const html=marked.parse(txt);
+        // ★ FIX: se gdiSanitize não carregou (CDL caiu, etc.), NÃO retorna HTML cru
+        if(window.gdiSanitize){try{return window.gdiSanitize(html);}catch(_){}}
+        return esc(txt).replace(/\n/g,'<br>');
+      }catch(_){}
+    }
     return esc(txt).replace(/\n/g,'<br>');
   }
 
@@ -950,7 +957,7 @@
       pdfTexts.forEach((pdf)=>{
         allTasks.push({
           hint:keyHintCounter++,
-          fn:()=>callIsaKeyed('Baseado neste material, gere 10 questões de concurso público em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"explanation":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"explanation":"..."}\nSem comentários, só JSON:\n\n'+pdf.text.slice(0,15000),keyHintCounter-1)
+          fn:()=>callIsaKeyed('Você é um examinador de concurso público brasileiro experiente. Baseado neste material, gere 10 questões de concurso em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"legalText":"...","explanation":"...","fundamentacao":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"legalText":"...","explanation":"...","fundamentacao":"..."}\n\nCAMPOS:\n- statement: enunciado claro, contexto completo\n- legalText: o dispositivo legal/dispositivo normativo aplicável (ex: "art. 5º, CF"; "Súmula Vinculante 14"; "Lei 8.906/94, art. 7º")\n- explanation: explicação técnica do acerto/erro (regra violada ou aplicada)\n- fundamentacao: fundamentação didática completa, explicando por que a alternativa correta está correta E por que as outras estão erradas\n\nSem comentários, só JSON.\n\n'+pdf.text.slice(0,15000),keyHintCounter-1)
             .then(resp=>{
               if(!resp)return;
               try{
@@ -959,9 +966,9 @@
                   if(!q||!q.statement)return;
                   let cleanQ;
                   if(q.type==='tf'||(!q.options&&q.correct!==undefined)){
-                    cleanQ={type:'tf',statement:String(q.statement),options:['Certo','Errado'],correct:Math.max(0,Math.min(1,Number(q.correct)||0)),explanation:String(q.explanation||'')};
+                    cleanQ={type:'tf',statement:String(q.statement),options:['Certo','Errado'],correct:Math.max(0,Math.min(1,Number(q.correct)||0)),explanation:String(q.explanation||''),legalText:String(q.legalText||q.fundamentacao||''),fundamentacao:String(q.fundamentacao||'')};
                   }else if(Array.isArray(q.options)){
-                    cleanQ={type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||'')};
+                    cleanQ={type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||''),legalText:String(q.legalText||q.fundamentacao||''),fundamentacao:String(q.fundamentacao||'')};
                   }
                   if(cleanQ){
                     const all=lsGet(LQ,[]);
@@ -978,7 +985,10 @@
       });
     }
 
-    // ★ EXECUTA TODAS AS TAREFAS AO MESMO TEMPO
+    // ★ EXECUTA TODAS AS TAREFAS AO MESMO TEMPO (paralelismo)
+    // Se OpenRouter estiver configurado no worker, cada callIsa automaticamente
+    // dispara 3 modelos free em paralelo (race) — primeiro a responder vence.
+    // Isso significa que resumo+pílulas+questões(N PDFs) = 2+N tarefas × 3 modelos = race máximo.
     if(allTasks.length>0){
       await Promise.allSettled(allTasks.map(t=>t.fn()));
     }
@@ -1821,8 +1831,70 @@
     await summary(items,bodyEl,lessonName);
   }
 
+  // ── Buscar questões compartilhadas por outros alunos da mesma matéria ──
+  // ★ usado pelo Simulado (gdi-study.js) para enriquecer o banco
+  async function fetchSharedQuestions(subjectFilter){
+    try{
+      const url='/api/ai/shared-flashcards'+(subjectFilter?'?subject='+encodeURIComponent(subjectFilter):'')+'&kind=question';
+      const r=await fetch(url,{cache:'no-store'});
+      const d=await r.json();
+      if(d&&d.ok&&Array.isArray(d.items)){
+        // converte cards compartilhados em questões
+        return d.items.filter(it=>it.statement).map(it=>({
+          id:it.id||('shared-'+Math.random().toString(36).slice(2,7)),
+          subject:subjectFilter||it.subject||'Compartilhada',
+          type:it.type||'mc',
+          statement:it.statement,
+          options:it.options||['a','b','c','d'],
+          correct:it.correct||0,
+          explanation:it.explanation||'',
+          legalText:it.legalText||'',
+          fundamentacao:it.fundamentacao||'',
+          source:'shared'
+        }));
+      }
+      return [];
+    }catch(_){return [];}
+  }
+
+  // ── Salvar MD da redação corrigida no Drive do aluno ──
+  // ★ chamado pela aba Redação (gdi-study.js) após correção
+  async function saveEssayMD(markdown,banca,tipo,score){
+    try{
+      const r=await fetch('/api/ai/essay/save',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          markdown:String(markdown||''),
+          banca:banca||'',
+          tipo:tipo||'',
+          score:String(score||''),
+          date:new Date().toISOString()
+        })});
+      const d=await r.json();
+      return !!(d&&d.ok);
+    }catch(_){return false;}
+  }
+
+  // ── Batalhão: dispara processamento em background via worker ──
+  // ★ chamado quando aluno adiciona um curso na Central de Estudos
+  async function startBattalion(courseKey, coursePath, lessonName, pdfList){
+    try{
+      const body={courseKey, coursePath, lessonName, pdfs:pdfList.map(p=>({name:p.name||'',url:p.url||'',text:p.text||''}))};
+      const r=await fetch('/api/ai/battalion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const d=await r.json();
+      return !!(d&&d.ok);
+    }catch(_){return false;}
+  }
+  // ── Verifica se o batalhão já processou um curso ──
+  async function getBattalionStatus(courseKey){
+    try{
+      const r=await fetch('/api/ai/battalion/status?courseKey='+encodeURIComponent(courseKey),{cache:'no-store'});
+      const d=await r.json();
+      return d;
+    }catch(_){return {ok:false,processed:false};}
+  }
+
   // ── Public API ──
-  window.gdiIsaPdf={summary,questions,mindmap,flashcards,regenerate,extractPdfText,saveIsaSummary,listIsaSummaries,delIsaSummary};
+  window.gdiIsaPdf={summary,questions,mindmap,flashcards,regenerate,extractPdfText,saveIsaSummary,listIsaSummaries,delIsaSummary,fetchSharedQuestions,fetchSharedSummaries,saveSharedSummary,saveEssayMD,startBattalion,getBattalionStatus};
 
   // ── Render: Resumos (M22 new tab) ──
   // ── Salvar resumo no pool compartilhado (todos os usuários) ──
@@ -1844,61 +1916,106 @@
 
   window.renderResumos=function(box){
     const all=listIsaSummaries();
+    // ★ agrupar por curso (path do aluno), trilha e matéria
+    const trails=(window.gdiTrails&&window.gdiTrails.get())||[];
+    const subjects=(window.gdiSubjects&&window.gdiSubjects.get())||[];
+    // tenta derivar curso do resumo (lesson = nome da aula → pega 1º segmento do path)
+    function courseOf(r){
+      const p=r.path||r.lessonKey||'';
+      if(p){const seg=p.split('/').filter(Boolean);if(seg.length>1)return seg.slice(0,2).join('/');}
+      return 'Sem curso';
+    }
+    function subjectOf(r){
+      // match com subjects manuais se houver nome parecido
+      const lesson=r.lesson||'';
+      const found=subjects.find(s=>lesson.toLowerCase().includes(s.name.toLowerCase()));
+      return found?found.name:'Geral';
+    }
+    const byCourse={};
+    all.forEach(r=>{
+      const c=courseOf(r);
+      if(!byCourse[c])byCourse[c]={items:[],subject:{} };
+      byCourse[c].items.push(r);
+      const s=subjectOf(r);
+      if(!byCourse[c].subject[s])byCourse[c].subject[s]=[];
+      byCourse[c].subject[s].push(r);
+    });
+    // ★ Tiles por curso (igual ao Meus Cursos), retangulares
+    const tilesHtml=Object.entries(byCourse).map(([course,info])=>{
+      const subs=Object.keys(info.subject).length;
+      const totalChars=info.items.reduce((s,r)=>s+(r.summary||'').length,0);
+      return `<div class="gdi-course" data-course="${esc(course)}" style="cursor:pointer;display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-left:4px solid var(--ferreto-primary,#ff8b9f);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(course)}</b>
+          <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));padding:2px 8px;border-radius:8px;">${info.items.length}</span>
+        </div>
+        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${subs} matéria(s) · ${Math.round(totalChars/1000)}k chars</div>
+      </div>`;
+    }).join('');
     box.innerHTML=`
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
-        <b style="color:var(--ferreto-text,#f0f6fc);">${all.length} resumo${all.length===1?'':'s'}</b>
-        <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">gerados pela Meggy 🐩 a partir dos PDFs das aulas</span>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;">
+        <div style="font-size:32px;flex:none;">📚</div>
+        <div style="flex:1;min-width:240px;">
+          <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:18px;">Resumos da Meggy</h3>
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0;line-height:1.5;">${all.length} resumo${all.length===1?'':'s'} gerado${all.length===1?'':'s'} pela Meggy 🐩, organizados por curso, trilha e matéria. Clique para expandir.</p>
+        </div>
       </div>
-      <div id="gdi-rs-list" style="display:flex;flex-direction:column;gap:8px;max-width:760px;"></div>
+      ${!all.length?'<div class="gdi-notes-empty" style="padding:40px 20px;text-align:center;"><i class="bi bi-file-earmark-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhum resumo ainda.<br><span style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Abra uma aula com PDF e clique em "Resumo Meggy" na barra de materiais.</span></div>':`<h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Meus resumos (${all.length})</h4>`}
+      <div class="gdi-courses" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:24px;">${tilesHtml}</div>
+      <div id="gdi-rs-list" style="display:none;flex-direction:column;gap:8px;"></div>
       <div id="gdi-rs-shared-section" style="margin-top:24px;">
-        <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;">📚 Resumos compartilhados por outros alunos</h4>
-        <div id="gdi-rs-shared" style="display:flex;flex-direction:column;gap:8px;max-width:760px;">
-          <div class="gdi-notes-empty" style="color:var(--ferreto-text-faint,#6b7488);">Carregando resumos compartilhados…</div>
+        <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;"><i class="bi bi-people"></i> Resumos compartilhados por outros alunos (mesma matéria)</h4>
+        <div id="gdi-rs-shared" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
+          <div class="gdi-notes-empty" style="color:var(--ferreto-text-faint,#6b7488);grid-column:1/-1;">Carregando…</div>
         </div>
       </div>`;
+    // ★ Tiles clicáveis → lista filtrada
     const list=box.querySelector('#gdi-rs-list');
-    if(!all.length){
-      list.innerHTML='<div class="gdi-notes-empty">Nenhum resumo ainda. Abra uma aula com PDF e clique em "Resumo Meggy" na barra de materiais.</div>';
-    }else{
-      all.forEach(r=>{
-        const row=document.createElement('div');row.className='gdi-note';
-        row.style.flexDirection='column';row.style.alignItems='stretch';
-        const dt=new Date(r.date).toLocaleString('pt-BR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-        row.innerHTML=`<div class="gdi-rs-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%;cursor:pointer;">
-          <span style="flex:1;min-width:0;">
-            <b style="color:var(--ferreto-text,#f0f6fc);"><i class="bi bi-stars" style="color:var(--ferreto-primary,#ff8b9f);"></i> ${esc(r.lesson)}</b>
-            <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-left:6px;">· ${dt}</span>
-          </span>
-          <button class="gdi-note-del" title="Excluir" style="flex:none;"><i class="bi bi-x-lg"></i></button>
-        </div>
-        <div class="gdi-rs-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
-        const body=row.querySelector('.gdi-rs-body');
-        const head=row.querySelector('.gdi-rs-head');
-        head.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
-        row.querySelector('button').onclick=(e)=>{e.stopPropagation();delIsaSummary(r.id);window.renderResumos(box);showToast('Resumo excluído');};
-        list.appendChild(row);
-      });
-    }
-    // carrega resumos compartilhados
+    box.querySelectorAll('[data-course]').forEach(tile=>{
+      tile.onclick=()=>{
+        const course=tile.dataset.course;
+        const items=byCourse[course]?byCourse[course].items:[];
+        box.querySelectorAll('[data-course]').forEach(t=>t.style.outline='');
+        tile.style.outline='2px solid var(--ferreto-primary,#ff8b9f)';
+        list.style.display='flex';
+        list.innerHTML='';
+        items.forEach(r=>{
+          const row=document.createElement('div');row.className='gdi-note';
+          row.style.flexDirection='column';row.style.alignItems='stretch';
+          const dt=new Date(r.date).toLocaleString('pt-BR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+          row.innerHTML=`<div class="gdi-rs-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%;cursor:pointer;">
+            <span style="flex:1;min-width:0;">
+              <b style="color:var(--ferreto-text,#f0f6fc);"><i class="bi bi-stars" style="color:var(--ferreto-primary,#ff8b9f);"></i> ${esc(r.lesson)}</b>
+              <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-left:6px;">· ${dt} · ${subjectOf(r)}</span>
+            </span>
+            <button class="gdi-note-del" title="Excluir" style="flex:none;"><i class="bi bi-x-lg"></i></button>
+          </div>
+          <div class="gdi-rs-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
+          const body=row.querySelector('.gdi-rs-body');
+          const head=row.querySelector('.gdi-rs-head');
+          head.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
+          row.querySelector('button').onclick=(e)=>{e.stopPropagation();delIsaSummary(r.id);window.renderResumos(box);showToast('Resumo excluído');};
+          list.appendChild(row);
+        });
+        list.scrollIntoView({behavior:'smooth',block:'nearest'});
+      };
+    });
+    // carrega resumos compartilhados (em tiles também)
     const sharedEl=box.querySelector('#gdi-rs-shared');
     fetchSharedSummaries().then(shared=>{
-      if(!shared.length){sharedEl.innerHTML='<div class="gdi-notes-empty">Nenhum resumo compartilhado ainda.</div>';return;}
+      if(!shared.length){sharedEl.innerHTML='<div class="gdi-notes-empty" style="grid-column:1/-1;">Nenhum resumo compartilhado ainda.</div>';return;}
       sharedEl.innerHTML='';
       shared.slice().reverse().forEach(r=>{
-        const row=document.createElement('div');row.className='gdi-note';
-        row.style.flexDirection='column';row.style.alignItems='stretch';
         const dt=new Date(r.date||0).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'});
-        row.innerHTML=`<div class="gdi-rs-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%;cursor:pointer;">
-          <span style="flex:1;min-width:0;">
-            <b style="color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-people" style="font-size:12px;"></i> ${esc(r.lessonName||'Aula')}</b>
-            <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-left:6px;">· por ${esc(r.author||'aluno')} · ${dt}</span>
-          </span>
+        const tile=document.createElement('div');tile.className='gdi-course';tile.style.cursor='pointer';tile.style.padding='12px 14px';
+        tile.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <b style="color:var(--ferreto-secondary,#5ddeda);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="bi bi-people" style="font-size:11px;"></i> ${esc(r.lessonName||'Aula')}</b>
         </div>
-        <div class="gdi-rs-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
-        const body=row.querySelector('.gdi-rs-body');
-        const head=row.querySelector('.gdi-rs-head');
-        head.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
-        sharedEl.appendChild(row);
+        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-top:4px;">por ${esc(r.author||'aluno')} · ${dt}</div>
+        <div class="gdi-rs-shared-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
+        const body=tile.querySelector('.gdi-rs-shared-body');
+        tile.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
+        sharedEl.appendChild(tile);
       });
     });
   };
@@ -2004,7 +2121,14 @@
   function save(){try{sessionStorage.setItem(STORE,JSON.stringify(messages.slice(-20)));}catch(_){}}
 
   function renderMd(txt){
-    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
+    if(window.marked){
+      try{
+        const html=marked.parse(txt);
+        // ★ FIX: nunca retorna HTML não sanitizado — fallback escapa
+        if(window.gdiSanitize){try{return window.gdiSanitize(html);}catch(_){}}
+        return esc(txt).replace(/\n/g,'<br>');
+      }catch(_){}
+    }
     return txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
   }
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -2095,7 +2219,8 @@
   const body=panel.querySelector('#gdi-ai-body');
   const input=panel.querySelector('#gdi-ai-input');
   const sendBtn=panel.querySelector('#gdi-ai-send');
-  const badge=panel.querySelector('#gdi-ai-fab-badge');
+  // ★ FIX: badge estava buscando dentro do panel, mas o badge está no fab
+  const badge=fab.querySelector('#gdi-ai-fab-badge');
 
   function addMsg(role,text){
     const m={role,text};
