@@ -7,7 +7,7 @@
 //     Provas, Redação, Radar, Estatísticas, Flashcards, Maratona)
 //   • M23: Estudo Ativo (banco de questões, simulado, cronograma SRS)
 //   • M24: Provas anteriores, Redação, Radar de Fracos
-//   • M-FERRETO: tema visual (fontes, cores, override de estilos)
+//   • BlackTie: tema visual (fontes, cores, override de estilos)
 //   • M-PLAYER-GUARD: watchdog contra vídeos travados
 //
 // Depende de: gdi-core.js, gdi-meggy.js (para extractPdfText)
@@ -2245,7 +2245,7 @@
 })();
 
 // ═══════════════════════════════════════════════════════════════
-// M-FERRETO: TEMA VISUAL FERRETO PARA OS MÓDULOS EXTRAS
+// BlackTie: TEMA VISUAL FERRETO PARA OS MÓDULOS EXTRAS
 // Carrega fontes (Poppins/Rubik/Inter), fixa tokens e reaplica a
 // linguagem visual Ferreto (coral #ff8b9f / teal #5ddeda) sobre os
 // componentes próprios deste extras (debug, pomodoro, notas,
@@ -2254,7 +2254,7 @@
 // ═══════════════════════════════════════════════════════════════
 (function(){
   if(window.__gdiFerretoExtras)return;window.__gdiFerretoExtras=true;
-  console.log('[GDI Extras] M-FERRETO tema aplicado');
+  console.log('[GDI Extras] BlackTie tema aplicado');
 
   // ── 1) Fontes Ferreto (Poppins / Rubik / Inter) ──
   if(!document.getElementById('gdi-ferreto-fonts')){

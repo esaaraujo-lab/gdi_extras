@@ -5508,7 +5508,7 @@ window.GDI_MODULES.push({name:'debug',init:function(){
 })();
 
 // ═══════════════════════════════════════════════════════════════
-// M-FERRETO: TEMA VISUAL FERRETO PARA OS MÓDULOS EXTRAS
+// BlackTie: TEMA VISUAL FERRETO PARA OS MÓDULOS EXTRAS
 // Carrega fontes (Poppins/Rubik/Inter), fixa tokens e reaplica a
 // linguagem visual Ferreto (coral #ff8b9f / teal #5ddeda) sobre os
 // componentes próprios deste extras (debug, pomodoro, notas,
@@ -5517,7 +5517,7 @@ window.GDI_MODULES.push({name:'debug',init:function(){
 // ═══════════════════════════════════════════════════════════════
 (function(){
   if(window.__gdiFerretoExtras)return;window.__gdiFerretoExtras=true;
-  console.log('[GDI Extras] M-FERRETO tema aplicado');
+  console.log('[GDI Extras] BlackTie tema aplicado');
 
   // ── 1) Fontes Ferreto (Poppins / Rubik / Inter) ──
   if(!document.getElementById('gdi-ferreto-fonts')){

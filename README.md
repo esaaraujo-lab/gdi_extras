@@ -17,7 +17,7 @@ download/
 │   ├── gdi-pdf.js             ← M17 visualizador PDF (5 KB)
 │   ├── gdi-ui.js              ← M10-M14, M16, M18-M20 (65 KB)
 │   ├── gdi-meggy.js           ← M9-ISA + M-AI (118 KB)
-│   └── gdi-study.js           ← M22-M24, M-FERRETO, M-PLAYER-GUARD (135 KB)
+│   └── gdi-study.js           ← M22-M24, BlackTie, M-PLAYER-GUARD (135 KB)
 └── test_flip_card.html     ← teste isolado do flip card
 ```
 

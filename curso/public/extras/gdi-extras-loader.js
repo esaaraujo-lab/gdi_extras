@@ -8,7 +8,7 @@
 //   2. gdi-pdf.js    (5 KB)   — M17 (visualizador PDF)
 //   3. gdi-ui.js     (65 KB)  — M10-M14, M16, M18-M20 (UI/UX)
 //   4. gdi-meggy.js  (118 KB) — M9-ISA + M-AI (Meggy + OCR + flashcards)
-//   5. gdi-study.js  (135 KB) — M22-M24, M-FERRETO, M-PLAYER-GUARD
+//   5. gdi-study.js  (135 KB) — M22-M24, BlackTie, M-PLAYER-GUARD
 // 
 // Como usar no worker:
 //   No lugar de servir gdi-extras.js, sirva ESTE loader (gdi-extras-loader.js).
