@@ -466,8 +466,9 @@
   }
 
   // ── Render Markdown (uses marked if available, fallback to <br>) ──
+  // ★ XSS-safe: sempre passa por gdiSanitize (DOMPurify)
   function renderMd(txt){
-    if(window.marked){try{return marked.parse(txt);}catch(_){}}
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return esc(txt).replace(/\n/g,'<br>');
   }
 
@@ -600,8 +601,34 @@
   }
 
   // ── Drive cache (GET/POST /api/ai/cache) ──
+  // ★ Sprint 4: agora tenta primeiro os endpoints granulares opcionais
+  //   /api/ai/summaries, /api/ai/flashcards, /api/ai/questions
+  //   Se falhar (worker antigo), cai para o cache unificado /api/ai/cache.
+  //   Isso permite migração gradual: worker novo = 4 arquivos; worker antigo = 1.
+  const GRANULAR_AVAILABLE = (function(){
+    // detecta uma vez se endpoints granulares existem (HEAD request)
+    let _checked=null;
+    return async function(){
+      if(_checked!==null)return _checked;
+      try{
+        const r=await fetch('/api/ai/summaries?probe=1',{method:'HEAD'});
+        _checked=r.ok;
+      }catch(_){_checked=false;}
+      return _checked;
+    };
+  })();
+
   async function cacheGet(){
     try{
+      // ★ tenta endpoint granular primeiro (summaries)
+      const granular=await GRANULAR_AVAILABLE();
+      if(granular){
+        const r=await fetch('/api/ai/summaries?key='+encodeURIComponent(lessonKey()),{cache:'no-store'});
+        const d=await r.json();
+        if(d&&d.ok&&d.cached)return d.cached;
+        return null;
+      }
+      // fallback: cache unificado antigo
       const r=await fetch('/api/ai/cache?key='+encodeURIComponent(lessonKey()),{cache:'no-store'});
       const d=await r.json();
       return (d&&d.ok&&d.cached)?d.cached:null;
@@ -616,7 +643,10 @@
         const existing=await cacheGet();
         mindmapToSave=(existing&&existing.mindmap)||null;
       }
-      await fetch('/api/ai/cache',{method:'POST',headers:{'Content-Type':'application/json'},
+      // ★ tenta endpoint granular primeiro; senão, cache unificado
+      const granular=await GRANULAR_AVAILABLE();
+      const endpoint=granular?'/api/ai/summaries':'/api/ai/cache';
+      await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({key:lessonKey(),summary,questions,mindmap:mindmapToSave,lessonName})});
     }catch(_){/* não bloqueia o fluxo se o cache falhar */}
   }
@@ -687,6 +717,9 @@
   // path: URL pathname como "/0:/Direito Constitucional/Aula 02.mp4"
   // Retorna {discipline, theme} — usado pela biblioteca de flashcards (M9)
   function extractDisciplineTheme(card){
+    // ★ prioridade 1: subject/theme explícitos (matéria manual)
+    if(card.subject&&card.theme)return{discipline:card.subject,theme:card.theme};
+    if(card.subject)return{discipline:card.subject,theme:card.theme||'Geral'};
     let discipline='Geral',theme='Geral';
     const path=card.path||'';
     const lessonName=card.lesson||((card.src||'').replace(/^ISA:/,'').replace(/^manual:/,''))||'';
@@ -725,6 +758,21 @@
   function normPath(p){try{return decodeURIComponent(String(p||''))}catch(_){return String(p||'')}}
   function stripExt(s){return String(s||'').replace(/\.[a-z0-9]{1,5}$/i,'').trim()};
 
+  // ★ Sistema de Matérias manuais (substitui heurística quando aplicável)
+  const LS_SUBJECTS='gdi-subjects-v1';
+  function getSubjects(){return lsGet(LS_SUBJECTS,[]);}
+  function saveSubject(subj){
+    const arr=getSubjects();
+    const idx=arr.findIndex(s=>s.id===subj.id);
+    if(idx>=0)arr[idx]=subj;else arr.push(subj);
+    lsSet(LS_SUBJECTS,arr);
+  }
+  function deleteSubject(id){
+    lsSet(LS_SUBJECTS,getSubjects().filter(s=>s.id!==id));
+  }
+  // expor para outros módulos
+  window.gdiSubjects={get:getSubjects,save:saveSubject,delete:deleteSubject,LS:LS_SUBJECTS};
+
   // ── GERAÇÃO EM CADEIA: resumo + pílulas + questões ──
   // Qualquer aba clicada (Resumo/Questões/Pílulas) dispara a geração
   // dos 3 em cadeia se ainda não existirem. Cada um é salvo no Drive.
@@ -732,6 +780,15 @@
 
   // Cache em memória para evitar regenerar na mesma sessão
   let _chainCache={};
+  // ★ Sprint 6: LRU no _chainCache (limita a 5 aulas em memória)
+  const _chainCacheMax=5;
+  function _chainCacheEvict(){
+    const keys=Object.keys(_chainCache);
+    if(keys.length>_chainCacheMax){
+      // remove o mais antigo (primeiro inserido — aproximação LRU)
+      delete _chainCache[keys[0]];
+    }
+  }
 
   // Extrai questões que já existem dentro do PDF (lista de exercícios)
   function extractQuestionsFromText(text){
@@ -764,7 +821,7 @@
 
     // verifica cache do Drive PRIMEIRO (antes de extrair PDF)
     const cached=await cacheGet();
-    if(!_chainCache[key])_chainCache[key]={};
+    if(!_chainCache[key]){_chainCache[key]={};_chainCacheEvict();}
     if(cached){
       _chainCache[key].summary=cached.summary||null;
       _chainCache[key].mindmap=cached.mindmap||null;
@@ -801,22 +858,32 @@
     let allText='';
     const pdfTexts=[];
     const pdfErrors=[]; // ★ coleta erros por PDF para diagnóstico
-    for(const item of items){
+    // ★ Sprint 6: paraleliza extração (era sequencial, demorava 4x mais)
+    if(progressCb)progressCb({phase:'extract-start',total:items.length});
+    const results=await Promise.allSettled(items.map(async item=>{
       try{
         if(progressCb)progressCb({phase:'extract',pdf:item.name});
         const txt=await extractPdfText(item.url,(p)=>{
           if(progressCb)progressCb(Object.assign({pdf:item.name},p));
         });
-        if(txt&&txt.trim().length>50){
-          allText+=(allText?'\n\n---\n\n':'')+txt;
-          pdfTexts.push({name:item.name,text:txt});
-        }
+        return {name:item.name,text:txt};
       }catch(e){
-        // ★ guarda o erro com nome do PDF para mostrar depois
-        pdfErrors.push({name:item.name,error:e.message||String(e),url:item.url});
-        console.warn('[Meggy] PDF falhou:',item.name,e.message);
+        throw {name:item.name,error:e.message||String(e),url:item.url};
       }
-    }
+    }));
+    results.forEach(r=>{
+      if(r.status==='fulfilled'){
+        const {name,text}=r.value;
+        if(text&&text.trim().length>50){
+          allText+=(allText?'\n\n---\n\n':'')+text;
+          pdfTexts.push({name,text});
+        }
+      }else{
+        const err=r.reason||{};
+        pdfErrors.push({name:err.name||'PDF',error:err.error||'erro',url:err.url||''});
+        console.warn('[Meggy] PDF falhou:',err.name,err.error);
+      }
+    });
     if(!allText||allText.trim().length<50){
       // ★ Mensagem detalhada com os erros de cada PDF
       let detail='Não foi possível extrair texto dos PDFs.';
@@ -1159,7 +1226,7 @@
             if(window.__gdiGradeQ)window.__gdiGradeQ(q.id,false);
           }
           if(idx+1<queue.length){idx++;draw();}
-          else{idx++;draw();} // vai pro resultado
+          else{idx++;draw();}  // ★ Sprint 6: simplificado — ambos os ramos fazem o mesmo
         };
       }
       const optsEl=bodyEl.querySelector('#gdi-q-opts');
@@ -1343,10 +1410,19 @@
             <button id="gdi-fc-add-toggle" class="gdi-mode-btn" title="Adicionar flashcard"><i class="bi bi-plus-lg"></i></button>
           </div>
         </div>
-        <div id="gdi-fc-add-form" class="gdi-fc-add-form" style="display:none;">
-          <input id="gdi-fc-add-f" placeholder="Frente (pergunta)" />
-          <input id="gdi-fc-add-b" placeholder="Verso (resposta)" />
-          <button id="gdi-fc-add-save" class="gdi-btn gdi-btn-primary"><i class="bi bi-check-lg"></i> Salvar</button>
+        <div id="gdi-fc-add-form" class="gdi-fc-add-form" style="display:none;flex-direction:column;gap:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="gdi-fc-add-subject" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;flex:1;min-width:140px;">
+              <option value="">Matéria (opcional)</option>
+            </select>
+            <input id="gdi-fc-add-theme" placeholder="Tema (opcional)" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;flex:1;min-width:140px;" />
+          </div>
+          <input id="gdi-fc-add-f" placeholder="Frente (pergunta)" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box;" />
+          <input id="gdi-fc-add-b" placeholder="Verso (resposta)" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box;" />
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="gdi-fc-add-save" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-check-lg"></i> Salvar</button>
+            <button id="gdi-fc-add-save-next" class="gdi-mode-btn" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Salvar e adicionar próximo</button>
+          </div>
         </div>
         <div class="gdi-fc-disciplines"></div>
       </div>`;
@@ -1501,30 +1577,101 @@
     // ── Add form toggle ──
     const addToggle = bodyEl.querySelector('#gdi-fc-add-toggle');
     const addForm = bodyEl.querySelector('#gdi-fc-add-form');
+    // ★ popula select de matérias
+    const subjectSel = bodyEl.querySelector('#gdi-fc-add-subject');
+    if(subjectSel && window.gdiSubjects){
+      const subs=window.gdiSubjects.get();
+      subs.forEach(s=>{
+        const opt=document.createElement('option');
+        opt.value=s.name;
+        opt.textContent=(s.icon||'')+s.name;
+        subjectSel.appendChild(opt);
+      });
+    }
     if(addToggle) addToggle.onclick = ()=>{
       const open = addForm.style.display !== 'none';
       addForm.style.display = open ? 'none' : 'flex';
+      if(!open){
+        const fEl=bodyEl.querySelector('#gdi-fc-add-f');
+        if(fEl)setTimeout(()=>fEl.focus(),50);
+      }
     };
-    const addSave = bodyEl.querySelector('#gdi-fc-add-save');
-    if(addSave) addSave.onclick = ()=>{
-      const f = bodyEl.querySelector('#gdi-fc-add-f').value.trim();
-      const b = bodyEl.querySelector('#gdi-fc-add-b').value.trim();
-      if(!f || !b){ showToast('Preencha frente e verso'); return; }
+    function saveNewCard(keepForm){
+      const fEl=bodyEl.querySelector('#gdi-fc-add-f');
+      const bEl=bodyEl.querySelector('#gdi-fc-add-b');
+      const subjEl=bodyEl.querySelector('#gdi-fc-add-subject');
+      const themeEl=bodyEl.querySelector('#gdi-fc-add-theme');
+      if(!fEl||!bEl){return;}
+      const f=fEl.value.trim();
+      const b=bEl.value.trim();
+      if(!f||!b){ showToast('Preencha frente e verso'); return; }
+      const subject=subjEl?subjEl.value.trim():'';
+      const theme=themeEl?themeEl.value.trim():'';
       const cards = lsGet('gdi-cards-v1', []);
-      cards.push({id:uid(), f, b, due:Date.now()+86400000, box:0, src:'manual:'+lesson, path:urlPath, lesson:lesson, createdAt:Date.now()});
+      const cardData={
+        id:uid(), f, b,
+        due:Date.now()+86400000,
+        box:0,
+        src:'manual:'+lesson,
+        path:urlPath,
+        lesson:lesson,
+        createdAt:Date.now()
+      };
+      if(subject)cardData.subject=subject;
+      if(theme)cardData.theme=theme;
+      cards.push(cardData);
       lsSet('gdi-cards-v1', cards);
       showToast('Flashcard adicionado!');
-      flashcards(items, bodyEl, lessonName);
-    };
+      if(keepForm){
+        fEl.value='';bEl.value='';
+        fEl.focus();
+        // re-renderiza a lista mantendo o formulário aberto
+        flashcards(items, bodyEl, lessonName);
+        // re-abre o form (flashcards re-renderizou fechado)
+        setTimeout(()=>{
+          const newForm=bodyEl.querySelector('#gdi-fc-add-form');
+          const newToggle=bodyEl.querySelector('#gdi-fc-add-toggle');
+          if(newForm)newForm.style.display='flex';
+          // restaurar subject/theme selecionados
+          const newSubj=bodyEl.querySelector('#gdi-fc-add-subject');
+          const newTheme=bodyEl.querySelector('#gdi-fc-add-theme');
+          if(newSubj&&subject)newSubj.value=subject;
+          if(newTheme)newTheme.value=theme;
+          const newF=bodyEl.querySelector('#gdi-fc-add-f');
+          if(newF)newF.focus();
+        },100);
+      }else{
+        flashcards(items, bodyEl, lessonName);
+      }
+    }
+    const addSave = bodyEl.querySelector('#gdi-fc-add-save');
+    if(addSave) addSave.onclick = ()=>saveNewCard(false);
+    const addSaveNext = bodyEl.querySelector('#gdi-fc-add-save-next');
+    if(addSaveNext) addSaveNext.onclick = ()=>saveNewCard(true);
+    // ★ Enter no campo "verso" salva e adiciona próximo
+    const addB=bodyEl.querySelector('#gdi-fc-add-b');
+    if(addB)addB.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();saveNewCard(true);}});
   }
 
   // ── Sessão de estudo de flashcards (vira o card) ──
   // ★FIX v2: usa o mesmo design flip 3D da biblioteca — visual consistente.
   function runFlashcardSession(bodyEl,lesson,queue,items,lessonName){
+    // ★ guard contra fila vazia (NaN% acerto)
+    if(!queue||!queue.length){
+      bodyEl.innerHTML=`<div class="gdi-mat-isa-result" style="text-align:center;padding:30px;">
+        <div style="font-size:48px;">📭</div>
+        <h3 style="color:var(--ferreto-primary,#ff8b9f);font-family:var(--ferreto-font-display,'Poppins',sans-serif);">Nenhum flashcard</h3>
+        <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin-top:8px;">Esta disciplina/tema não tem cards para estudar.</p>
+        <button id="gdi-fc-back-list" class="gdi-btn gdi-btn-primary" style="margin-top:14px;"><i class="bi bi-arrow-left"></i> Voltar aos flashcards</button>
+      </div>`;
+      const back=bodyEl.querySelector('#gdi-fc-back-list');
+      if(back)back.onclick=()=>flashcards(items,bodyEl,lessonName);
+      return;
+    }
     let idx=0,hits=0,misses=0;
     function draw(){
       if(idx>=queue.length){
-        const pct=Math.round(hits/queue.length*100);
+        const pct=queue.length?Math.round(hits/queue.length*100):0;
         bodyEl.innerHTML=`<div class="gdi-mat-isa-result" style="max-width:760px;text-align:center;">
           <div style="font-size:48px;">${pct>=60?'🎉':'📚'}</div>
           <h3 style="color:var(--ferreto-primary,#ff8b9f);font-family:var(--ferreto-font-display,'Poppins',sans-serif);">Sessão concluída!</h3>
@@ -1532,7 +1679,8 @@
           <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${esc(lesson)}</p>
           <button id="gdi-fc-back-list" class="gdi-btn gdi-btn-primary" style="margin-top:14px;"><i class="bi bi-arrow-left"></i> Voltar aos flashcards</button>
         </div>`;
-        bodyEl.querySelector('#gdi-fc-back-list').onclick=()=>flashcards(items,bodyEl,lessonName);
+        const back=bodyEl.querySelector('#gdi-fc-back-list');
+        if(back)back.onclick=()=>flashcards(items,bodyEl,lessonName);
         return;
       }
       const c=queue[idx];
@@ -1558,11 +1706,22 @@
           </div>
         </div>
         <div id="gdi-fc-grade" class="gdi-fc-session-grade" style="display:none;">
-          <p>Você sabia a resposta?</p>
+          <p>Como foi?</p>
           <div class="gdi-fc-grade-btns">
-            <button id="gdi-fc-no" class="gdi-mode-btn gdi-fc-btn-no"><i class="bi bi-x-circle"></i> Não sabia</button>
-            <button id="gdi-fc-yes" class="gdi-btn gdi-btn-primary gdi-fc-btn-yes"><i class="bi bi-check-circle"></i> Sabia!</button>
+            <button id="gdi-fc-again" class="gdi-mode-btn gdi-fc-btn-again" title="Não sabia (1)">
+              <i class="bi bi-arrow-counterclockwise"></i> Não sabia<br><small>+1d</small>
+            </button>
+            <button id="gdi-fc-hard" class="gdi-mode-btn gdi-fc-btn-hard" title="Quase (2)">
+              <i class="bi bi-dash-circle"></i> Quase<br><small>+3d</small>
+            </button>
+            <button id="gdi-fc-good" class="gdi-btn gdi-btn-primary gdi-fc-btn-good" title="Sabia (3)">
+              <i class="bi bi-check-circle"></i> Sabia<br><small>+${window.gdiSrsIntervals?window.gdiSrsIntervals[1]:3}d</small>
+            </button>
+            <button id="gdi-fc-easy" class="gdi-mode-btn gdi-fc-btn-easy" title="Fácil (4)">
+              <i class="bi bi-stars"></i> Fácil<br><small>+${Math.round((window.gdiSrsIntervals?window.gdiSrsIntervals[2]:7)*1.5)}d</small>
+            </button>
           </div>
+          <p style="font-size:10px;color:var(--ferreto-text-muted,#8b949e);margin-top:8px;">Atalhos: 1 2 3 4 · Espaço vira</p>
         </div>
         <div class="gdi-fc-session-foot">
           <button id="gdi-fc-skip" title="Pular" class="gdi-fc-skip-btn"><i class="bi bi-arrow-right"></i></button>
@@ -1576,27 +1735,75 @@
         if(flipped)return;flipped=true;
         card.classList.add('gdi-fc-flipped');
         grade.style.display='block';
+        // foca no botão "Good" para Enter funcionar
+        const goodBtn=bodyEl.querySelector('#gdi-fc-good');
+        if(goodBtn)setTimeout(()=>goodBtn.focus(),100);
       };
-      // sabia / não sabia
-      bodyEl.querySelector('#gdi-fc-yes').onclick=()=>{
-        hits++;
-        // atualiza SRS do flashcard (box+1, due = +7 dias)
+      // ★ SRS unificado via gdiGradeCard (SM-2 simplificado)
+      const gradeCard=(quality)=>{
         const cards=lsGet('gdi-cards-v1',[]);
         const ci=cards.findIndex(x=>x.id===c.id);
-        if(ci>=0){cards[ci].box=Math.min(4,(cards[ci].box||0)+1);cards[ci].due=Date.now()+[1,3,7,21,60][cards[ci].box]*86400000;lsSet('gdi-cards-v1',cards);}
+        if(ci>=0){
+          const result=window.gdiGradeCard(cards[ci],quality);
+          cards[ci].box=result.box;
+          cards[ci].due=result.due;
+          cards[ci].lastReview=result.lastReview;
+          lsSet('gdi-cards-v1',cards);
+        }
+        if(quality===1)misses++;      // Again
+        else if(quality===3)hits++;   // Good
+        else if(quality===4)hits++;   // Easy
+        // ★ contador de cards estudados (para conquistas)
+        try{
+          const n=parseInt(localStorage.getItem('gdi-cards-studied-count')||'0')+1;
+          localStorage.setItem('gdi-cards-studied-count',String(n));
+          // dispara checagem de conquistas
+          if(window.gdiAchievements){
+            window.gdiAchievements.checkAll({cardsStudied:n,cardsCreated:cards.length});
+          }
+        }catch(_){}
         idx++;draw();
       };
-      bodyEl.querySelector('#gdi-fc-no').onclick=()=>{
-        misses++;
-        const cards=lsGet('gdi-cards-v1',[]);
-        const ci=cards.findIndex(x=>x.id===c.id);
-        if(ci>=0){cards[ci].box=0;cards[ci].due=Date.now()+86400000;lsSet('gdi-cards-v1',cards);}
-        idx++;draw();
-      };
+      bodyEl.querySelector('#gdi-fc-again').onclick=()=>gradeCard(1);
+      bodyEl.querySelector('#gdi-fc-hard').onclick=()=>gradeCard(2);
+      bodyEl.querySelector('#gdi-fc-good').onclick=()=>gradeCard(3);
+      bodyEl.querySelector('#gdi-fc-easy').onclick=()=>gradeCard(4);
       // pular
       bodyEl.querySelector('#gdi-fc-skip').onclick=()=>{idx++;draw();};
+      // ★ atalhos de teclado (1/2/3/4 + espaço para virar)
+      const keyHandler=(e)=>{
+        if(!grade.style.display||grade.style.display==='none'){
+          if(e.code==='Space'){e.preventDefault();card.click();}
+          return;
+        }
+        if(e.key==='1'){e.preventDefault();gradeCard(1);}
+        else if(e.key==='2'){e.preventDefault();gradeCard(2);}
+        else if(e.key==='3'){e.preventDefault();gradeCard(3);}
+        else if(e.key==='4'){e.preventDefault();gradeCard(4);}
+      };
+      document.addEventListener('keydown',keyHandler);
+      // limpar listener ao trocar de card (guarda para cleanup)
+      if(!bodyEl.__fcKeyCleanup){
+        bodyEl.__fcKeyCleanup=()=>{
+          document.removeEventListener('keydown',keyHandler);
+        };
+      }else{
+        bodyEl.__fcKeyCleanup();
+        bodyEl.__fcKeyCleanup=()=>{
+          document.removeEventListener('keydown',keyHandler);
+        };
+      }
     }
     draw();
+    // cleanup final quando sessão terminar (idx>=queue.length)
+    const _origDraw=draw;
+    draw=function(){
+      _origDraw();
+      if(idx>=queue.length&&bodyEl.__fcKeyCleanup){
+        bodyEl.__fcKeyCleanup();
+        bodyEl.__fcKeyCleanup=null;
+      }
+    };
   }
 
   // ── Regenerate: força regeração de tudo (limpa cache em memória + Drive) ──
@@ -1797,7 +2004,7 @@
   function save(){try{sessionStorage.setItem(STORE,JSON.stringify(messages.slice(-20)));}catch(_){}}
 
   function renderMd(txt){
-    if(window.marked){try{return marked.parse(txt);}catch(_){}}
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
   }
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}

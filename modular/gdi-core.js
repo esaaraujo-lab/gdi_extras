@@ -30,6 +30,180 @@ const GDI_ROOT=()=>document.documentElement; // UI flutuante vive aqui (fora do 
 
 window.GDI_MODULES = window.GDI_MODULES || [];
 
+// ═══ HELPER GLOBAL: SRS (Spaced Repetition) UNIFICADO ═══
+// Algoritmo SM-2 simplificado (mesmo do Anki). Usado por M9-ISA e M22
+// para evitar conflitos de intervalos diferentes.
+//
+// Qualidade (quality):
+//   1 = Again (não sabia)  → box=0, due=+1dia
+//   2 = Hard (quase)       → box mantém, due=+3dias
+//   3 = Good (sabia)       → box+1, due=intervalo[box]
+//   4 = Easy (fácil)       → box+2, due=intervalo[box]*1.5
+//
+// Intervalos por caixa: [1, 3, 7, 21, 60] dias (5 caixas, cap 4)
+window.gdiGradeCard = window.gdiGradeCard || function(card, quality){
+  if(!card)card={box:0};
+  const BOX_INTERVALS=[1,3,7,21,60]; // dias
+  const DAY=86400000;
+  const box=Math.max(0,Math.min(4,card.box||0));
+  let newBox=box, due;
+  if(quality===1){ // Again
+    newBox=0;
+    due=Date.now()+DAY;
+  }else if(quality===2){ // Hard
+    newBox=box; // mantém
+    due=Date.now()+3*DAY;
+  }else if(quality===3){ // Good
+    newBox=Math.min(4,box+1);
+    due=Date.now()+BOX_INTERVALS[newBox]*DAY;
+  }else{ // Easy (4)
+    newBox=Math.min(4,box+2);
+    due=Date.now()+Math.round(BOX_INTERVALS[newBox]*1.5*DAY);
+  }
+  return {box:newBox, due:due, lastReview:Date.now()};
+};
+// expor intervalos para UI mostrar "próxima revisão em X dias"
+window.gdiSrsIntervals = [1,3,7,21,60];
+
+// ═══ HELPER GLOBAL: TRILHAS DE ESTUDO + CONQUISTAS + ONBOARDING ═══
+// Trilhas: agrupam cursos + matérias em uma meta (ex: "Auditor Fiscal")
+// Conquistas: marcos gamificados (streak, cards, aulas)
+// Onboarding: tour inicial para novos usuários
+window.gdiTrails = window.gdiTrails || {
+  LS:'gdi-trails-v1',
+  get(){const v=localStorage.getItem(this.LS);return v?JSON.parse(v):[];},
+  save(t){const arr=this.get();const i=arr.findIndex(x=>x.id===t.id);if(i>=0)arr[i]=t;else arr.push(t);try{localStorage.setItem(this.LS,JSON.stringify(arr));}catch(_){}},
+  delete(id){try{localStorage.setItem(this.LS,JSON.stringify(this.get().filter(x=>x.id!==id)));}catch(_){}}
+};
+
+window.gdiAchievements = window.gdiAchievements || {
+  LS:'gdi-achievements-v1',
+  _defs:[
+    {id:'first_lesson',icon:'🎬',title:'Primeira aula',desc:'Assista sua primeira aula',check:s=>s.watched>=1},
+    {id:'streak_3',icon:'🔥',title:'3 dias seguidos',desc:'Mantenha uma sequência de 3 dias',check:s=>s.streak>=3},
+    {id:'streak_7',icon:'⚡',title:'Semana completa',desc:'7 dias seguidos estudando',check:s=>s.streak>=7},
+    {id:'streak_30',icon:'🏆',title:'Mês de ferro',desc:'30 dias seguidos',check:s=>s.streak>=30},
+    {id:'cards_50',icon:'🃏',title:'50 flashcards',desc:'Estude 50 flashcards',check:s=>s.cardsStudied>=50},
+    {id:'cards_100',icon:'🎴',title:'100 flashcards',desc:'Estude 100 flashcards',check:s=>s.cardsStudied>=100},
+    {id:'cards_500',icon:'💎',title:'Mestre dos cards',desc:'500 flashcards estudados',check:s=>s.cardsStudied>=500},
+    {id:'simulado_1',icon:'🎯',title:'Primeiro simulado',desc:'Complete um simulado',check:s=>s.simulados>=1},
+    {id:'simulado_5',icon:'📊',title:'5 simulados',desc:'Complete 5 simulados',check:s=>s.simulados>=5},
+    {id:'goal_met',icon:'⭐',title:'Meta batida',desc:'Atinge sua meta diária',check:s=>s.goalMet},
+    {id:'flashcard_create',icon:'✨',title:'Criou um card',desc:'Crie seu primeiro flashcard',check:s=>s.cardsCreated>=1},
+    {id:'summary_gen',icon:'📋',title:'Primeiro resumo',desc:'Gere um resumo com a Meggy',check:s=>s.summaries>=1},
+  ],
+  getUnlocked(){
+    try{return JSON.parse(localStorage.getItem(this.LS)||'[]');}catch(_){return [];}
+  },
+  isUnlocked(id){return this.getUnlocked().includes(id);},
+  unlock(id){
+    const arr=this.getUnlocked();
+    if(!arr.includes(id)){
+      arr.push(id);
+      try{localStorage.setItem(this.LS,JSON.stringify(arr));}catch(_){}
+      // dispara toast comemorativo
+      const def=this._defs.find(d=>d.id===id);
+      if(def&&window.showToast){
+        setTimeout(()=>window.showToast(`🎉 Conquista desbloqueada: ${def.title}!`),500);
+      }
+    }
+  },
+  checkAll(stats){
+    // stats = {watched, streak, cardsStudied, simulados, goalMet, cardsCreated, summaries}
+    this._defs.forEach(d=>{
+      if(!this.isUnlocked(d.id)&&d.check(stats)){
+        this.unlock(d.id);
+      }
+    });
+  },
+  defs(){return this._defs;}
+};
+
+// ═══ HELPER GLOBAL: MODAL CUSTOMIZADO (substitui confirm() nativo) ═══
+// Mantém o tema Ferreto. Retorna Promise<boolean>.
+window.gdiModal = window.gdiModal || function(opts){
+  return new Promise((resolve)=>{
+    const {title='',message='',confirmText='Confirmar',cancelText='Cancelar',danger=false,input=null}=opts||{};
+    // remove modais anteriores
+    document.querySelectorAll('.gdi-modal-overlay').forEach(m=>m.remove());
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;animation:gdi-modal-fade .2s ease;';
+    overlay.innerHTML=`<div class="gdi-modal-box" style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">${escModal(title)}</b>
+        <button class="gdi-modal-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;">
+        <p style="color:var(--ferreto-text,#e6edf3);font-size:14px;line-height:1.6;margin:0 0 16px;white-space:pre-wrap;">${escModal(message)}</p>
+        ${input?`<input id="gdi-modal-input" placeholder="${escModal(input.placeholder||'')}" value="${escModal(input.value||'')}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">`:''}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;flex-wrap:wrap;">
+        <button class="gdi-modal-cancel gdi-mode-btn" style="font-size:13px;">${escModal(cancelText)}</button>
+        <button class="gdi-modal-confirm ${danger?'gdi-modal-danger':''}" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-family:inherit;font-weight:600;${danger?'background:#ff6b6b;color:#fff;':'background:var(--ferreto-grad);color:#fff;'}">${escModal(confirmText)}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    // animação
+    if(!document.getElementById('gdi-modal-style')){
+      const s=document.createElement('style');s.id='gdi-modal-style';
+      s.textContent='@keyframes gdi-modal-fade{from{opacity:0}to{opacity:1}}@keyframes gdi-modal-pop{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}.gdi-modal-box{animation:gdi-modal-pop .2s ease;}.gdi-modal-cancel:hover{background:rgba(255,255,255,.1)!important;}.gdi-modal-danger:hover{filter:brightness(1.1);}.gdi-modal-x:hover{background:rgba(255,107,107,.15)!important;color:#ff6b6b!important;}';
+      document.head.appendChild(s);
+    }
+    const close=(result)=>{
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector('.gdi-modal-x').onclick=()=>close(input?null:false);
+    overlay.querySelector('.gdi-modal-cancel').onclick=()=>close(input?null:false);
+    overlay.querySelector('.gdi-modal-confirm').onclick=()=>{
+      if(input){
+        const val=overlay.querySelector('#gdi-modal-input').value.trim();
+        close(val||null);
+      }else close(true);
+    };
+    overlay.onclick=(e)=>{if(e.target===overlay)close(input?null:false);};
+    // ESC para fechar
+    const escHandler=(e)=>{if(e.key==='Escape'){close(input?null:false);document.removeEventListener('keydown',escHandler);}};
+    document.addEventListener('keydown',escHandler);
+    // foca no input ou no botão confirm
+    setTimeout(()=>{
+      if(input){overlay.querySelector('#gdi-modal-input').focus();}
+      else{overlay.querySelector('.gdi-modal-confirm').focus();}
+    },50);
+  });
+};
+function escModal(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ═══ HELPER GLOBAL: SANITIZAÇÃO HTML (anti-XSS) ═══
+// Usado por todos os renderMd() dos módulos para evitar XSS via LLM
+// ou resumos compartilhados. Tenta DOMPurify se disponível; senão,
+// faz uma sanitização básica removendo tags perigosas.
+window.gdiSanitize = window.gdiSanitize || function(html){
+  if(window.DOMPurify){
+    try{return window.DOMPurify.sanitize(html,{ALLOWED_TAGS:['h1','h2','h3','h4','h5','h6','p','br','hr','ul','ol','li','strong','em','b','i','u','s','code','pre','blockquote','table','thead','tbody','tr','th','td','a','img','span','div','sup','sub','mark','del','ins'],ALLOWED_ATTR:['href','src','alt','title','class','target','rel','width','height','colspan','rowspan']});}catch(_){return html;}
+  }
+  // fallback básico: remove <script>, on* handlers, javascript: URLs
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi,'')
+    .replace(/<style[\s\S]*?<\/style>/gi,'')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi,'')
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi,'')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi,'')
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi,'')
+    .replace(/(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi,'$1="#"');
+};
+// auto-load DOMPurify do CDN se não estiver presente
+if(!window.DOMPurify && !window.__gdiPurifyLoading){
+  window.__gdiPurifyLoading=true;
+  const s=document.createElement('script');
+  s.src='https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js';
+  s.crossOrigin='anonymous';
+  s.onload=()=>console.log('[GDI] DOMPurify carregado');
+  s.onerror=()=>console.warn('[GDI] DOMPurify falhou — usando fallback básico');
+  document.head.appendChild(s);
+}
+
 // ── CSS dos módulos (injetado 1×) ──
 (function(){if(document.getElementById('gdi-extras-style'))return;const s=document.createElement('style');s.id='gdi-extras-style';s.textContent=`
 .gdi-debug-wrap{width:100%;background:#0d1117;border-top:2px solid #f0883e;font-family:monospace;font-size:12px;}
@@ -269,6 +443,28 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
           GDIUser.setLast(LAST_KEY());
         }catch(_){}
         Bus.emit('watched:changed');
+        // ★ dispara checagem de conquistas
+        if(window.gdiAchievements){
+          try{
+            const d=window.GDIUser&&GDIUser.dump?GDIUser.dump():{};
+            const w=d.watched||{};
+            // streak (já calculado em M22, mas recalcular aqui por segurança)
+            const acts={};const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
+            for(const k in w)touch(w[k]&&w[k].at);
+            let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
+            if(!has(dd))dd.setDate(dd.getDate()-1);
+            while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
+            window.gdiAchievements.checkAll({
+              watched:Object.keys(w).length,
+              streak:streak,
+              cardsStudied:parseInt(localStorage.getItem('gdi-cards-studied-count')||'0'),
+              simulados:parseInt(localStorage.getItem('gdi-simulados-count')||'0'),
+              goalMet:false,
+              cardsCreated:(JSON.parse(localStorage.getItem('gdi-cards-v1')||'[]')).length,
+              summaries:(JSON.parse(localStorage.getItem('gdi-isa-summaries-v1')||'[]')).length
+            });
+          }catch(_){}
+        }
       }
     });
     el.addEventListener('loadedmetadata',()=>{

@@ -839,7 +839,13 @@
     renderPanel();
     ensureState().then(()=>{if(panel&&panel.style.display!=='none')renderPanel();});
   }
-  function closePanel(){FC.active=false;if(panel)panel.style.display='none';}
+  function closePanel(){
+    FC.active=false;
+    // ★ limpa timer do simulado se ativo (evita salvar simulado fantasma)
+    const body=panel&&panel.querySelector('#gdi-central-body');
+    if(body&&body.__simTimer){clearInterval(body.__simTimer);body.__simTimer=null;}
+    if(panel)panel.style.display='none';
+  }
   // ★ Expõe openPanel para outros módulos (ex.: M9-ISA botão "Resolver
   // agora →" pode abrir a Central na aba Questões como fallback).
   window.__gdiOpenCentral=openPanel;
@@ -852,7 +858,7 @@
         <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">Meta hoje: ${fmtMin(t)}/${fmtMin(g)}</span>
         <div style="flex:1;max-width:160px;height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.1));border-radius:3px;overflow:hidden;"><div style="height:6px;width:${pct}%;background:${t>=g?'#2f9e44':'var(--ferreto-grad)'};"></div></div>
         <input id="gdi-goal-set" type="number" min="10" max="480" value="${g}" title="Meta di\u00e1ria (minutos)" style="width:56px;background:var(--ferreto-surface-2,rgba(255,255,255,.07));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#f0f6fc);text-align:center;padding:3px 5px;font-size:12px;">
-        <button class="gdi-mode-btn" id="gdi-central-x" style="padding:4px 10px;">\u2715</button>
+        <button class="gdi-mode-btn" id="gdi-central-x" style="padding:4px 10px;margin-left:auto;order:99;" title="Fechar (Esc)">\u2715</button>
       </div>
       <div class="gdi-central-tabs">
         <button class="gdi-central-tab ${tab==='cursos'?'active':''}" data-t="cursos">\ud83d\udccd Meus Cursos</button>
@@ -866,6 +872,9 @@
         <button class="gdi-central-tab ${tab==='radar'?'active':''}" data-t="radar">\ud83c\udfaf Mapa de Fracos</button>
         <button class="gdi-central-tab ${tab==='stats'?'active':''}" data-t="stats">\ud83d\udcca Estat\u00edsticas</button>
         <button class="gdi-central-tab ${tab==='fc'?'active':''}" data-t="fc">\ud83e\uddf0 Flashcards</button>
+        <button class="gdi-central-tab ${tab==='subjects'?'active':''}" data-t="subjects">\ud83d\udcdd Mat\u00e9rias</button>
+        <button class="gdi-central-tab ${tab==='trails'?'active':''}" data-t="trails">\ud83c\udfaft Trilhas</button>
+        <button class="gdi-central-tab ${tab==='achievements'?'active':''}" data-t="achievements">\ud83c\udfc6 Conquistas</button>
         <button class="gdi-central-tab ${tab==='mar'?'active':''}" data-t="mar">\ud83d\ude80 Maratona</button>
       </div>
       <div class="gdi-central-body" id="gdi-central-body"></div>
@@ -875,7 +884,12 @@
       const v=Math.max(10,Math.min(480,parseInt(e.target.value,10)||60));
       lsSet(LS_GOAL,v);renderPanel();
     });
-    panel.querySelectorAll('.gdi-central-tab').forEach(b=>b.onclick=()=>{tab=b.dataset.t;FC.active=false;renderPanel();});
+    panel.querySelectorAll('.gdi-central-tab').forEach(b=>b.onclick=()=>{
+      // ★ limpa timer do simulado ao trocar de aba
+      const body=panel.querySelector('#gdi-central-body');
+      if(body&&body.__simTimer){clearInterval(body.__simTimer);body.__simTimer=null;}
+      tab=b.dataset.t;FC.active=false;renderPanel();
+    });
     const body=panel.querySelector('#gdi-central-body');
     if(tab==='cursos')renderCursos(body);
     else if(tab==='questoes')renderQuestoes(body);
@@ -888,7 +902,309 @@
     else if(tab==='radar'){if(window.renderRadar)window.renderRadar(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de radar indispon\u00edvel.</div>';}
     else if(tab==='stats')renderStats(body);
     else if(tab==='fc')renderFlash(body);
+    else if(tab==='subjects')renderSubjects(body);
+    else if(tab==='trails')renderTrails(body);
+    else if(tab==='achievements')renderAchievements(body);
     else renderMarathon(body);
+  }
+
+  // ★ Aba "Trilhas" — agrupar cursos em uma meta
+  function renderTrails(box){
+    if(!window.gdiTrails){
+      box.innerHTML='<div class="gdi-notes-empty">Sistema de trilhas indisponível.</div>';
+      return;
+    }
+    const trails=window.gdiTrails.get();
+    box.innerHTML=`<div style="max-width:760px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;">Trilhas de Estudo</b>
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Agrupe cursos e matérias em uma meta. Ex: "Auditor Fiscal" = Direito Tributário + Contabilidade + Português.</p>
+        </div>
+        <button id="gdi-trail-add" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Nova trilha</button>
+      </div>
+      <div id="gdi-trail-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>`;
+    const list=box.querySelector('#gdi-trail-list');
+    function drawList(){
+      const all=window.gdiTrails.get();
+      if(!all.length){
+        list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-signpost-2" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma trilha criada.<br><span style="font-size:12px;">Clique em "Nova trilha" para organizar seus cursos em uma meta.</span></div>';
+        return;
+      }
+      list.innerHTML='';
+      all.forEach(t=>{
+        const total=t.courses?t.courses.length:0;
+        const el=document.createElement('div');
+        el.className='gdi-note';
+        el.style.cssText='display:flex;align-items:center;gap:12px;padding:14px;cursor:pointer;';
+        el.innerHTML=`
+          <span style="font-size:28px;flex:none;">${t.icon||'🎯'}</span>
+          <div style="flex:1;min-width:0;">
+            <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${escHtml(t.name)}</b>
+            ${t.description?`<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">${escHtml(t.description)}</small>`:''}
+            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${total} curso${total!==1?'s':''} · meta: ${t.goal||'—'} dias</small>
+          </div>
+          <button class="gdi-mode-btn gdi-trail-edit" data-id="${escHtml(t.id)}" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>
+          <button class="gdi-mode-btn gdi-trail-del" data-id="${escHtml(t.id)}" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>
+        `;
+        list.appendChild(el);
+      });
+      list.querySelectorAll('.gdi-trail-edit').forEach(b=>b.onclick=()=>editTrail(b.dataset.id,box,drawList));
+      list.querySelectorAll('.gdi-trail-del').forEach(b=>b.onclick=async ()=>{
+        const tr=window.gdiTrails.get().find(x=>x.id===b.dataset.id);
+        if(!tr)return;
+        const ok=await window.gdiModal({
+          title:'Excluir trilha',
+          message:'Excluir "'+tr.name+'"? Os cursos vinculados NÃO serão excluídos.',
+          confirmText:'Excluir',
+          cancelText:'Cancelar',
+          danger:true
+        });
+        if(ok){
+          window.gdiTrails.delete(b.dataset.id);
+          showToast('Trilha excluída');
+          drawList();
+        }
+      });
+    }
+    drawList();
+    box.querySelector('#gdi-trail-add').onclick=()=>editTrail(null,box,drawList);
+  }
+  function editTrail(id,box,afterSave){
+    const existing=id?window.gdiTrails.get().find(t=>t.id===id):null;
+    const icons=['🎯','🏆','🚀','⭐','🎓','💼','🏛️','⚖️','📊','🔬','🌍','💡'];
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">${existing?'Editar trilha':'Nova trilha'}</b>
+        <button id="gdi-trail-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome *</label>
+          <input id="gdi-trail-name" placeholder="Ex: Auditor Fiscal 2026" value="${existing?escHtml(existing.name):''}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Descrição (opcional)</label>
+          <input id="gdi-trail-desc" placeholder="Ex: Concurso para Receita Federal" value="${existing?escHtml(existing.description||''):''}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+          <div id="gdi-trail-icons" style="display:flex;gap:6px;flex-wrap:wrap;">${icons.map(ic=>`<button class="gdi-trail-ic" data-ic="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid ${existing&&existing.icon===ic?'var(--ferreto-primary,#ff8b9f)':'var(--ferreto-border,#30363d)'};border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}</div>
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta (dias para terminar)</label>
+          <input id="gdi-trail-goal" type="number" min="1" max="3650" value="${existing?(existing.goal||90):90}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
+        <button id="gdi-trail-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
+        <button id="gdi-trail-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">${existing?'Salvar':'Criar trilha'}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    let selIcon=existing?existing.icon:icons[0];
+    overlay.querySelectorAll('.gdi-trail-ic').forEach(b=>b.onclick=()=>{
+      overlay.querySelectorAll('.gdi-trail-ic').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
+      b.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+      selIcon=b.dataset.ic;
+    });
+    const close=()=>overlay.remove();
+    overlay.querySelector('#gdi-trail-x').onclick=close;
+    overlay.querySelector('#gdi-trail-cancel').onclick=close;
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    overlay.querySelector('#gdi-trail-save').onclick=()=>{
+      const name=overlay.querySelector('#gdi-trail-name').value.trim();
+      if(!name){showToast('Digite o nome da trilha');return;}
+      const desc=overlay.querySelector('#gdi-trail-desc').value.trim();
+      const goal=parseInt(overlay.querySelector('#gdi-trail-goal').value)||90;
+      window.gdiTrails.save({
+        id:existing?existing.id:('trail-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)),
+        name,description:desc,icon:selIcon,goal,
+        courses:existing?existing.courses:[],
+        createdAt:existing?existing.createdAt:Date.now()
+      });
+      close();
+      showToast(existing?'Trilha atualizada':'Trilha criada!');
+      if(afterSave)afterSave();
+    };
+    setTimeout(()=>overlay.querySelector('#gdi-trail-name').focus(),50);
+  }
+
+  // ★ Aba "Conquistas" — gamificação
+  function renderAchievements(box){
+    if(!window.gdiAchievements){
+      box.innerHTML='<div class="gdi-notes-empty">Sistema de conquistas indisponível.</div>';
+      return;
+    }
+    const unlocked=window.gdiAchievements.getUnlocked();
+    const defs=window.gdiAchievements.defs();
+    const total=defs.length;
+    const pct=Math.round(unlocked.length/total*100);
+    box.innerHTML=`<div style="max-width:760px;">
+      <div style="text-align:center;margin-bottom:20px;padding:20px;background:linear-gradient(135deg,rgba(255,139,159,.1),rgba(93,222,218,.06));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;">
+        <div style="font-size:48px;margin-bottom:8px;">🏆</div>
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:18px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">Conquistas</b>
+        <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:6px 0 0;">${unlocked.length} de ${total} desbloqueadas · ${pct}% completo</p>
+        <div style="height:8px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:4px;overflow:hidden;margin:14px auto 0;max-width:300px;">
+          <div style="height:8px;width:${pct}%;background:var(--ferreto-grad);border-radius:4px;transition:width .4s;"></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">
+        ${defs.map(d=>{
+          const isUnlocked=unlocked.includes(d.id);
+          return `<div style="background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid ${isUnlocked?'rgba(63,185,80,.3)':'var(--ferreto-border,#21262d)'};border-radius:12px;padding:14px;text-align:center;${isUnlocked?'':'opacity:.5;'}">
+            <div style="font-size:32px;margin-bottom:6px;${isUnlocked?'':'filter:grayscale(1);'}">${d.icon}</div>
+            <b style="color:${isUnlocked?'#3fb950':'var(--ferreto-text-muted,#8b949e)'};font-size:13px;display:block;">${escHtml(d.title)}</b>
+            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:4px;line-height:1.4;">${escHtml(d.desc)}</small>
+            ${isUnlocked?'<div style="font-size:10px;color:#3fb950;margin-top:6px;font-weight:600;">✓ DESBLOQUEADA</div>':'<div style="font-size:10px;color:var(--ferreto-text-faint,#6b7488);margin-top:6px;">bloqueada</div>'}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  // ★ Aba "Matérias" — gerenciar matérias manuais
+  function renderSubjects(box){
+    if(!window.gdiSubjects){
+      box.innerHTML='<div class="gdi-notes-empty">Sistema de matérias indisponível.</div>';
+      return;
+    }
+    const subs=window.gdiSubjects.get();
+    box.innerHTML=`<div style="max-width:760px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;">Matérias</b>
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Crie matérias para organizar seus flashcards. Ex: "Direito Constitucional", "Português", "Raciocínio Lógico".</p>
+        </div>
+        <button id="gdi-subj-add" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Nova matéria</button>
+      </div>
+      <div id="gdi-subj-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>`;
+    const list=box.querySelector('#gdi-subj-list');
+    function drawList(){
+      const all=window.gdiSubjects.get();
+      if(!all.length){
+        list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-journal-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma matéria criada ainda.<br><span style="font-size:12px;">Clique em "Nova matéria" para começar.</span></div>';
+        return;
+      }
+      // contar cards por matéria
+      const cards=lsGet('gdi-cards-v1',[]);
+      const countByName={};
+      cards.forEach(c=>{if(c.subject)countByName[c.subject]=(countByName[c.subject]||0)+1;});
+      list.innerHTML='';
+      all.forEach(s=>{
+        const count=countByName[s.name]||0;
+        const el=document.createElement('div');
+        el.className='gdi-note';
+        el.style.cssText='display:flex;align-items:center;gap:12px;padding:12px 14px;';
+        el.innerHTML=`
+          <span style="font-size:24px;flex:none;">${s.icon||'📚'}</span>
+          <div style="flex:1;min-width:0;">
+            <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;display:flex;align-items:center;gap:6px;">${escHtml(s.name)}<span style="width:8px;height:8px;border-radius:50%;background:${s.color||'#ff8b9f'};display:inline-block;"></span></b>
+            ${s.notes?`<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">${escHtml(s.notes)}</small>`:''}
+            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${count} card${count!==1?'s':''} · meta: ${s.goal||60} min/dia</small>
+          </div>
+          <button class="gdi-mode-btn gdi-subj-edit" data-id="${escHtml(s.id)}" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>
+          <button class="gdi-mode-btn gdi-subj-del" data-id="${escHtml(s.id)}" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>
+        `;
+        list.appendChild(el);
+      });
+      list.querySelectorAll('.gdi-subj-edit').forEach(b=>b.onclick=()=>editSubject(b.dataset.id,box));
+      list.querySelectorAll('.gdi-subj-del').forEach(b=>b.onclick=async ()=>{
+        const sub=all.find(x=>x.id===b.dataset.id);
+        if(!sub)return;
+        const ok=await window.gdiModal({
+          title:'Excluir matéria',
+          message:'Excluir "'+sub.name+'"? Os flashcards vinculados NÃO serão excluídos — apenas a matéria some da lista.',
+          confirmText:'Excluir',
+          cancelText:'Cancelar',
+          danger:true
+        });
+        if(ok){
+          window.gdiSubjects.delete(b.dataset.id);
+          showToast('Matéria excluída');
+          drawList();
+        }
+      });
+    }
+    drawList();
+    box.querySelector('#gdi-subj-add').onclick=()=>editSubject(null,box,drawList);
+  }
+  function editSubject(id,box,afterSave){
+    const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];
+    const icons=['⚖️','📐','📚','🎯','🧮','📖','🔬','💼','🌍','🏛️','⚙️','🎵','📝','🎨','💻','🏥'];
+    const existing=id?window.gdiSubjects.get().find(s=>s.id===id):null;
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">${existing?'Editar matéria':'Nova matéria'}</b>
+        <button id="gdi-subj-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome *</label>
+          <input id="gdi-subj-name" placeholder="Ex: Direito Constitucional" value="${existing?escHtml(existing.name):''}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+          <div id="gdi-subj-icons" style="display:flex;gap:6px;flex-wrap:wrap;">${icons.map(ic=>`<button class="gdi-subj-ic" data-ic="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid ${existing&&existing.icon===ic?'var(--ferreto-primary,#ff8b9f)':'var(--ferreto-border,#30363d)'};border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}</div>
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
+          <div id="gdi-subj-colors" style="display:flex;gap:6px;flex-wrap:wrap;">${colors.map(c=>`<button class="gdi-subj-cl" data-cl="${c}" style="background:${c};border:${existing&&existing.color===c?'4px':'2px'} solid ${existing&&existing.color===c?'#fff':'transparent'};border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}</div>
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
+          <input id="gdi-subj-goal" type="number" min="10" max="480" value="${existing?(existing.goal||60):60}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
+          <textarea id="gdi-subj-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;">${existing?escHtml(existing.notes||''):''}</textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
+        <button id="gdi-subj-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
+        <button id="gdi-subj-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">${existing?'Salvar':'Criar matéria'}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    let selIcon=existing?existing.icon:icons[0];
+    let selColor=existing?existing.color:colors[0];
+    overlay.querySelectorAll('.gdi-subj-ic').forEach(b=>b.onclick=()=>{
+      overlay.querySelectorAll('.gdi-subj-ic').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
+      b.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+      selIcon=b.dataset.ic;
+    });
+    overlay.querySelectorAll('.gdi-subj-cl').forEach(b=>b.onclick=()=>{
+      overlay.querySelectorAll('.gdi-subj-cl').forEach(x=>{x.style.borderWidth='2px';x.style.borderColor='transparent';});
+      b.style.borderWidth='4px';b.style.borderColor='#fff';
+      selColor=b.dataset.cl;
+    });
+    const close=()=>overlay.remove();
+    overlay.querySelector('#gdi-subj-x').onclick=close;
+    overlay.querySelector('#gdi-subj-cancel').onclick=close;
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    overlay.querySelector('#gdi-subj-save').onclick=()=>{
+      const name=overlay.querySelector('#gdi-subj-name').value.trim();
+      if(!name){showToast('Digite o nome da matéria');return;}
+      const goal=parseInt(overlay.querySelector('#gdi-subj-goal').value)||60;
+      const notes=overlay.querySelector('#gdi-subj-notes').value.trim();
+      window.gdiSubjects.save({
+        id:existing?existing.id:('subj-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)),
+        name,icon:selIcon,color:selColor,goal,notes,
+        createdAt:existing?existing.createdAt:Date.now()
+      });
+      close();
+      showToast(existing?'Matéria atualizada':'Matéria criada!');
+      if(afterSave)afterSave();
+    };
+    setTimeout(()=>overlay.querySelector('#gdi-subj-name').focus(),50);
   }
   // ★ Otimização: limpa nome do curso (remove paths crus, underscores, etc)
   function cleanCourseName(ck){
@@ -916,8 +1232,14 @@
         </div>`:''}
       </div>`;
       const restoreBtn=box.querySelector('#gdi-restore-courses');
-      if(restoreBtn)restoreBtn.onclick=()=>{
-        if(confirm('Restaurar todos os '+hidden.length+' curso(s) oculto(s)?')){
+      if(restoreBtn)restoreBtn.onclick=async ()=>{
+        const ok=await window.gdiModal({
+          title:'Restaurar cursos',
+          message:'Restaurar todos os '+hidden.length+' curso(s) oculto(s)?',
+          confirmText:'Restaurar',
+          cancelText:'Cancelar'
+        });
+        if(ok){
           lsSet(LS_HIDDEN,[]);
           showToast('Cursos restaurados');
           renderCursos(box);
@@ -927,19 +1249,61 @@
     }
     box.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
       <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${cs.length} curso${cs.length>1?'s':''} em andamento</b>
-      ${hidden.length?`<button id="gdi-show-hidden" class="gdi-mode-btn" style="font-size:11px;"><i class="bi bi-eye-slash"></i> ${hidden.length} oculto${hidden.length>1?'s':''}</button>`:''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button id="gdi-add-manual-course" class="gdi-mode-btn" style="font-size:11px;"><i class="bi bi-plus-lg"></i> Adicionar curso</button>
+        ${hidden.length?`<button id="gdi-show-hidden" class="gdi-mode-btn" style="font-size:11px;"><i class="bi bi-eye-slash"></i> ${hidden.length} oculto${hidden.length>1?'s':''}</button>`:''}
+      </div>
     </div>
-    <div class="gdi-courses"></div>`;
+    <div style="margin-bottom:14px;">
+      <input id="gdi-courses-search" type="search" placeholder="Buscar curso..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:9px 12px;font-size:13px;font-family:inherit;" value="${escHtml(box.__search||'')}">
+    </div>
+    <div class="gdi-courses"></div>
+    <div id="gdi-courses-pager" style="margin-top:14px;text-align:center;"></div>`;
     const grid=box.querySelector('.gdi-courses');
+    const pagerEl=box.querySelector('#gdi-courses-pager');
+    const searchInput=box.querySelector('#gdi-courses-search');
 
-    // ★ botão "mostrar ocultos" (no header da lista)
+    // ★ botão "Adicionar curso manual"
+    const addManualBtn=box.querySelector('#gdi-add-manual-course');
+    if(addManualBtn)addManualBtn.onclick=()=>showAddCourseModal(box);
+
+    // ★ botão "mostrar ocultos"
     const showHiddenBtn=box.querySelector('#gdi-show-hidden');
-    if(showHiddenBtn)showHiddenBtn.onclick=()=>{
-      showHiddenCoursesModal(box);
-    };
+    if(showHiddenBtn)showHiddenBtn.onclick=()=>showHiddenCoursesModal(box);
 
-    // Mostra até 20 cursos
-    cs.slice(0,20).forEach(c=>{
+    // ★ busca + paginação
+    const PAGE_SIZE=12;
+    let currentPage=box.__page||0;
+    function applyFilter(){
+      const q=(box.__search||'').toLowerCase().trim();
+      const filtered=q?cs.filter(c=>cleanCourseName(c.key).toLowerCase().includes(q)||driveNameOf(c.key).toLowerCase().includes(q)):cs;
+      const totalPages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
+      if(currentPage>=totalPages)currentPage=totalPages-1;
+      if(currentPage<0)currentPage=0;
+      const slice=filtered.slice(currentPage*PAGE_SIZE,(currentPage+1)*PAGE_SIZE);
+      // limpar grid
+      grid.innerHTML='';
+      if(!slice.length){
+        grid.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;">'+(q?'Nenhum curso encontrado para "'+escHtml(q)+'"':'Nenhum curso ainda.')+'</div>';
+      }
+      slice.forEach(c=>renderCourseCard(grid,c,box));
+      // paginação
+      if(totalPages>1){
+        pagerEl.innerHTML=`<div style="display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;">
+          <button class="gdi-mode-btn" id="gdi-courses-prev" style="font-size:11px;padding:5px 10px;" ${currentPage===0?'disabled':''}><i class="bi bi-chevron-left"></i> Anterior</button>
+          <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">Página ${currentPage+1} de ${totalPages}</span>
+          <button class="gdi-mode-btn" id="gdi-courses-next" style="font-size:11px;padding:5px 10px;" ${currentPage===totalPages-1?'disabled':''}>Próxima <i class="bi bi-chevron-right"></i></button>
+        </div>
+        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-top:6px;">Mostrando ${slice.length} de ${filtered.length} curso${filtered.length>1?'s':''}${q?' (filtrado por "'+escHtml(q)+'")':''}</div>`;
+        const prev=pagerEl.querySelector('#gdi-courses-prev');
+        const next=pagerEl.querySelector('#gdi-courses-next');
+        if(prev)prev.onclick=()=>{currentPage--;applyFilter();};
+        if(next)next.onclick=()=>{currentPage++;applyFilter();};
+      }else{
+        pagerEl.innerHTML=filtered.length>PAGE_SIZE?`<div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">Mostrando ${slice.length} de ${filtered.length} cursos</div>`:'';
+      }
+    }
+    function renderCourseCard(grid,c,box){
       const name=cleanCourseName(c.key);
       const drive=driveNameOf(c.key);
       const progress=c.lessons.size>0?Math.round(c.watched/c.lessons.size*100):0;
@@ -972,14 +1336,21 @@
         }
       });
 
-      // ★ botão remover (ocultar)
+      // botão remover
       const removeBtn=el.querySelector('.gdi-course-remove');
       if(removeBtn){
         removeBtn.onmouseenter=()=>{removeBtn.style.color='#ff8b8b';removeBtn.style.background='rgba(255,107,107,.15)';};
         removeBtn.onmouseleave=()=>{removeBtn.style.color='var(--ferreto-text-muted,#8b949e)';removeBtn.style.background='transparent';};
-        removeBtn.onclick=(e)=>{
+        removeBtn.onclick=async (e)=>{
           e.stopPropagation();
-          if(confirm('Ocultar "'+name+'" da sua lista de cursos?\n\nO curso não será excluído — você pode restaurá-lo depois. Apenas desaparece da lista "Meus Cursos".')){
+          const ok=await window.gdiModal({
+            title:'Ocultar curso',
+            message:'Ocultar "'+name+'" da sua lista de cursos?\n\nO curso não será excluído — você pode restaurá-lo depois.',
+            confirmText:'Ocultar',
+            cancelText:'Cancelar',
+            danger:true
+          });
+          if(ok){
             hideCourse(c.key);
             showToast('Curso ocultado');
             renderCursos(box);
@@ -987,12 +1358,118 @@
         };
       }
 
-      // ★ clicar no card (não nos botões) abre detalhes
+      // clicar no card abre detalhes
       el.onclick=(e)=>{
-        if(e.target.closest('button'))return; // não abre detalhes se clicou em botão
+        if(e.target.closest('button'))return;
         openCourseDetail(box,c);
       };
+    }
+    if(searchInput){
+      let _searchTimer=null;
+      searchInput.addEventListener('input',function(){
+        if(_searchTimer)clearTimeout(_searchTimer);
+        _searchTimer=setTimeout(()=>{
+          box.__search=this.value;
+          currentPage=0;
+          box.__page=0;
+          applyFilter();
+        },250);
+      });
+    }
+    applyFilter();
+  }
+
+  // ★ Modal para adicionar curso manualmente
+  function showAddCourseModal(box){
+    const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];
+    const icons=['⚖️','📐','📚','🎯','🧮','📖','🔬','💼','🌍','🏛️','⚙️','🎵'];
+    const html=`<div style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome do curso *</label>
+        <input id="gdi-amc-name" placeholder="Ex: Direito Constitucional para Concurso" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+        <div id="gdi-amc-icons" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${icons.map((ic,i)=>`<button class="gdi-amc-icon-btn" data-icon="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}
+        </div>
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
+        <div id="gdi-amc-colors" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${colors.map((c,i)=>`<button class="gdi-amc-color-btn" data-color="${c}" style="background:${c};border:2px solid transparent;border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}
+        </div>
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
+        <input id="gdi-amc-goal" type="number" min="10" max="480" value="60" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
+        <textarea id="gdi-amc-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;"></textarea>
+      </div>
+    </div>`;
+    // cria overlay custom (gdiModal só suporta 1 input, então fazemos manual)
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">+ Adicionar curso manual</b>
+        <button id="gdi-amc-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;">${html}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
+        <button id="gdi-amc-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
+        <button id="gdi-amc-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">Salvar curso</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    let selectedIcon=icons[0];
+    let selectedColor=colors[0];
+    overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(b=>{
+      b.onclick=()=>{
+        overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
+        b.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+        selectedIcon=b.dataset.icon;
+      };
     });
+    overlay.querySelectorAll('.gdi-amc-color-btn').forEach(b=>{
+      b.onclick=()=>{
+        overlay.querySelectorAll('.gdi-amc-color-btn').forEach(x=>x.style.borderWidth='2px');
+        b.style.borderWidth='4px';
+        selectedColor=b.dataset.color;
+      };
+    });
+    // default selection
+    const firstIcon=overlay.querySelector('.gdi-amc-icon-btn');
+    if(firstIcon)firstIcon.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+    const firstColor=overlay.querySelector('.gdi-amc-color-btn');
+    if(firstColor)firstColor.style.borderWidth='4px';
+    const close=()=>overlay.remove();
+    overlay.querySelector('#gdi-amc-x').onclick=close;
+    overlay.querySelector('#gdi-amc-cancel').onclick=close;
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    overlay.querySelector('#gdi-amc-save').onclick=async ()=>{
+      const name=overlay.querySelector('#gdi-amc-name').value.trim();
+      if(!name){showToast('Digite o nome do curso');return;}
+      const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
+      const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
+      // salvar curso manual
+      const LS_MANUAL='gdi-manual-courses-v1';
+      const manual=lsGet(LS_MANUAL,[]);
+      manual.push({
+        id:'mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
+        name,icon:selectedIcon,color:selectedColor,
+        goal,notes,createdAt:Date.now(),
+        manual:true
+      });
+      lsSet(LS_MANUAL,manual);
+      close();
+      showToast('Curso "'+name+'" adicionado!');
+      renderCursos(box);
+    };
+    setTimeout(()=>overlay.querySelector('#gdi-amc-name').focus(),50);
   }
 
   // ★ Modal de cursos ocultos
@@ -1035,8 +1512,14 @@
         showHiddenCoursesModal(box);
       };
     });
-    box.querySelector('#gdi-restore-all').onclick=()=>{
-      if(confirm('Restaurar todos os '+hidden.length+' cursos?')){
+    box.querySelector('#gdi-restore-all').onclick=async ()=>{
+      const ok=await window.gdiModal({
+        title:'Restaurar todos',
+        message:'Restaurar todos os '+hidden.length+' cursos?',
+        confirmText:'Restaurar todos',
+        cancelText:'Cancelar'
+      });
+      if(ok){
         lsSet(LS_HIDDEN,[]);
         showToast('Todos os cursos restaurados');
         renderCursos(box);
@@ -1138,8 +1621,15 @@
     // back
     box.querySelector('#gdi-detail-back').onclick=()=>renderCursos(box);
     // hide
-    box.querySelector('#gdi-detail-hide').onclick=()=>{
-      if(confirm('Ocultar "'+name+'" da sua lista de cursos?')){
+    box.querySelector('#gdi-detail-hide').onclick=async ()=>{
+      const ok=await window.gdiModal({
+        title:'Ocultar curso',
+        message:'Ocultar "'+name+'" da sua lista de cursos?',
+        confirmText:'Ocultar',
+        cancelText:'Cancelar',
+        danger:true
+      });
+      if(ok){
         hideCourse(c.key);
         showToast('Curso ocultado');
         renderCursos(box);
@@ -1363,13 +1853,16 @@
       const all=cards();
       const ix=all.findIndex(x=>x.id===c.id);
       if(ix>=0){
-        const day=86400000,steps=[1,7,30,90];
-        if(g===1){all[ix].box=0;all[ix].due=Date.now()+day;}
-        else if(g===2){all[ix].due=Date.now()+3*day;}
-        else{all[ix].box=Math.min((all[ix].box||0)+1,3);all[ix].due=Date.now()+steps[all[ix].box]*day;}
+        // ★ SRS unificado via gdiGradeCard (SM-2 simplificado)
+        // M22 usava [1,7,30,90] com 4 caixas cap 3; agora usa [1,3,7,21,60] com 5 caixas cap 4
+        // (mesmo algoritmo do M9-ISA)
+        const result=window.gdiGradeCard(all[ix],g);
+        all[ix].box=result.box;
+        all[ix].due=result.due;
+        all[ix].lastReview=result.lastReview;
         saveCards(all);
       }
-      if(g===3)ok++;
+      if(g===3||g===4)ok++;  // Good ou Easy contam como "lembrou"
       i++;draw();
     }
     draw();
@@ -1490,7 +1983,7 @@
   }
 
   function renderMd(txt){
-    if(window.marked){try{return marked.parse(txt);}catch(_){}}
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return esc(txt).replace(/\n/g,'<br>');
   }
 

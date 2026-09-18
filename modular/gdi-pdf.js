@@ -76,8 +76,15 @@
         $("#pdf-spinner").html(`<div class="gdi-alert gdi-alert-error">Could not load PDF: ${u.message}</div>`);
       }),
       document.getElementById("pdf-prev").addEventListener("click",function(){o>1&&(o--,$("#pdf-spinner").show(),f(o))}),
-      document.getElementById("pdf-next").addEventListener("click",function(){d&&o<d.numPages&&(o++,$("#pdf-spinner").show(),f(o))}),
-      document.getElementById("pdf-zoom").addEventListener("input",function(){s=parseInt(this.value)/100,document.getElementById("pdf-zoom-val").textContent=this.value+"%",f(o)});
+      document.getElementById("pdf-next").addEventListener("click",function(){d&&o<d.numPages&&(o++,$("#pdf-spinner").show(),f(o))});
+      // ★ debounce no zoom (evita re-render a cada pixel do slider)
+      let _zoomTimer=null;
+      document.getElementById("pdf-zoom").addEventListener("input",function(){
+        s=parseInt(this.value)/100;
+        document.getElementById("pdf-zoom-val").textContent=this.value+"%";
+        if(_zoomTimer)clearTimeout(_zoomTimer);
+        _zoomTimer=setTimeout(()=>{f(o);_zoomTimer=null;},150);
+      });
     }
     if(typeof pdfjsLib<"u")r();
     else{

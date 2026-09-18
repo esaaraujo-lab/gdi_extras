@@ -17,6 +17,180 @@ const GDI_ROOT=()=>document.documentElement; // UI flutuante vive aqui (fora do 
 
 window.GDI_MODULES = window.GDI_MODULES || [];
 
+// ═══ HELPER GLOBAL: SRS (Spaced Repetition) UNIFICADO ═══
+// Algoritmo SM-2 simplificado (mesmo do Anki). Usado por M9-ISA e M22
+// para evitar conflitos de intervalos diferentes.
+//
+// Qualidade (quality):
+//   1 = Again (não sabia)  → box=0, due=+1dia
+//   2 = Hard (quase)       → box mantém, due=+3dias
+//   3 = Good (sabia)       → box+1, due=intervalo[box]
+//   4 = Easy (fácil)       → box+2, due=intervalo[box]*1.5
+//
+// Intervalos por caixa: [1, 3, 7, 21, 60] dias (5 caixas, cap 4)
+window.gdiGradeCard = window.gdiGradeCard || function(card, quality){
+  if(!card)card={box:0};
+  const BOX_INTERVALS=[1,3,7,21,60]; // dias
+  const DAY=86400000;
+  const box=Math.max(0,Math.min(4,card.box||0));
+  let newBox=box, due;
+  if(quality===1){ // Again
+    newBox=0;
+    due=Date.now()+DAY;
+  }else if(quality===2){ // Hard
+    newBox=box; // mantém
+    due=Date.now()+3*DAY;
+  }else if(quality===3){ // Good
+    newBox=Math.min(4,box+1);
+    due=Date.now()+BOX_INTERVALS[newBox]*DAY;
+  }else{ // Easy (4)
+    newBox=Math.min(4,box+2);
+    due=Date.now()+Math.round(BOX_INTERVALS[newBox]*1.5*DAY);
+  }
+  return {box:newBox, due:due, lastReview:Date.now()};
+};
+// expor intervalos para UI mostrar "próxima revisão em X dias"
+window.gdiSrsIntervals = [1,3,7,21,60];
+
+// ═══ HELPER GLOBAL: TRILHAS DE ESTUDO + CONQUISTAS + ONBOARDING ═══
+// Trilhas: agrupam cursos + matérias em uma meta (ex: "Auditor Fiscal")
+// Conquistas: marcos gamificados (streak, cards, aulas)
+// Onboarding: tour inicial para novos usuários
+window.gdiTrails = window.gdiTrails || {
+  LS:'gdi-trails-v1',
+  get(){const v=localStorage.getItem(this.LS);return v?JSON.parse(v):[];},
+  save(t){const arr=this.get();const i=arr.findIndex(x=>x.id===t.id);if(i>=0)arr[i]=t;else arr.push(t);try{localStorage.setItem(this.LS,JSON.stringify(arr));}catch(_){}},
+  delete(id){try{localStorage.setItem(this.LS,JSON.stringify(this.get().filter(x=>x.id!==id)));}catch(_){}}
+};
+
+window.gdiAchievements = window.gdiAchievements || {
+  LS:'gdi-achievements-v1',
+  _defs:[
+    {id:'first_lesson',icon:'🎬',title:'Primeira aula',desc:'Assista sua primeira aula',check:s=>s.watched>=1},
+    {id:'streak_3',icon:'🔥',title:'3 dias seguidos',desc:'Mantenha uma sequência de 3 dias',check:s=>s.streak>=3},
+    {id:'streak_7',icon:'⚡',title:'Semana completa',desc:'7 dias seguidos estudando',check:s=>s.streak>=7},
+    {id:'streak_30',icon:'🏆',title:'Mês de ferro',desc:'30 dias seguidos',check:s=>s.streak>=30},
+    {id:'cards_50',icon:'🃏',title:'50 flashcards',desc:'Estude 50 flashcards',check:s=>s.cardsStudied>=50},
+    {id:'cards_100',icon:'🎴',title:'100 flashcards',desc:'Estude 100 flashcards',check:s=>s.cardsStudied>=100},
+    {id:'cards_500',icon:'💎',title:'Mestre dos cards',desc:'500 flashcards estudados',check:s=>s.cardsStudied>=500},
+    {id:'simulado_1',icon:'🎯',title:'Primeiro simulado',desc:'Complete um simulado',check:s=>s.simulados>=1},
+    {id:'simulado_5',icon:'📊',title:'5 simulados',desc:'Complete 5 simulados',check:s=>s.simulados>=5},
+    {id:'goal_met',icon:'⭐',title:'Meta batida',desc:'Atinge sua meta diária',check:s=>s.goalMet},
+    {id:'flashcard_create',icon:'✨',title:'Criou um card',desc:'Crie seu primeiro flashcard',check:s=>s.cardsCreated>=1},
+    {id:'summary_gen',icon:'📋',title:'Primeiro resumo',desc:'Gere um resumo com a Meggy',check:s=>s.summaries>=1},
+  ],
+  getUnlocked(){
+    try{return JSON.parse(localStorage.getItem(this.LS)||'[]');}catch(_){return [];}
+  },
+  isUnlocked(id){return this.getUnlocked().includes(id);},
+  unlock(id){
+    const arr=this.getUnlocked();
+    if(!arr.includes(id)){
+      arr.push(id);
+      try{localStorage.setItem(this.LS,JSON.stringify(arr));}catch(_){}
+      // dispara toast comemorativo
+      const def=this._defs.find(d=>d.id===id);
+      if(def&&window.showToast){
+        setTimeout(()=>window.showToast(`🎉 Conquista desbloqueada: ${def.title}!`),500);
+      }
+    }
+  },
+  checkAll(stats){
+    // stats = {watched, streak, cardsStudied, simulados, goalMet, cardsCreated, summaries}
+    this._defs.forEach(d=>{
+      if(!this.isUnlocked(d.id)&&d.check(stats)){
+        this.unlock(d.id);
+      }
+    });
+  },
+  defs(){return this._defs;}
+};
+
+// ═══ HELPER GLOBAL: MODAL CUSTOMIZADO (substitui confirm() nativo) ═══
+// Mantém o tema Ferreto. Retorna Promise<boolean>.
+window.gdiModal = window.gdiModal || function(opts){
+  return new Promise((resolve)=>{
+    const {title='',message='',confirmText='Confirmar',cancelText='Cancelar',danger=false,input=null}=opts||{};
+    // remove modais anteriores
+    document.querySelectorAll('.gdi-modal-overlay').forEach(m=>m.remove());
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;animation:gdi-modal-fade .2s ease;';
+    overlay.innerHTML=`<div class="gdi-modal-box" style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">${escModal(title)}</b>
+        <button class="gdi-modal-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;">
+        <p style="color:var(--ferreto-text,#e6edf3);font-size:14px;line-height:1.6;margin:0 0 16px;white-space:pre-wrap;">${escModal(message)}</p>
+        ${input?`<input id="gdi-modal-input" placeholder="${escModal(input.placeholder||'')}" value="${escModal(input.value||'')}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">`:''}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;flex-wrap:wrap;">
+        <button class="gdi-modal-cancel gdi-mode-btn" style="font-size:13px;">${escModal(cancelText)}</button>
+        <button class="gdi-modal-confirm ${danger?'gdi-modal-danger':''}" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-family:inherit;font-weight:600;${danger?'background:#ff6b6b;color:#fff;':'background:var(--ferreto-grad);color:#fff;'}">${escModal(confirmText)}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    // animação
+    if(!document.getElementById('gdi-modal-style')){
+      const s=document.createElement('style');s.id='gdi-modal-style';
+      s.textContent='@keyframes gdi-modal-fade{from{opacity:0}to{opacity:1}}@keyframes gdi-modal-pop{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}.gdi-modal-box{animation:gdi-modal-pop .2s ease;}.gdi-modal-cancel:hover{background:rgba(255,255,255,.1)!important;}.gdi-modal-danger:hover{filter:brightness(1.1);}.gdi-modal-x:hover{background:rgba(255,107,107,.15)!important;color:#ff6b6b!important;}';
+      document.head.appendChild(s);
+    }
+    const close=(result)=>{
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector('.gdi-modal-x').onclick=()=>close(input?null:false);
+    overlay.querySelector('.gdi-modal-cancel').onclick=()=>close(input?null:false);
+    overlay.querySelector('.gdi-modal-confirm').onclick=()=>{
+      if(input){
+        const val=overlay.querySelector('#gdi-modal-input').value.trim();
+        close(val||null);
+      }else close(true);
+    };
+    overlay.onclick=(e)=>{if(e.target===overlay)close(input?null:false);};
+    // ESC para fechar
+    const escHandler=(e)=>{if(e.key==='Escape'){close(input?null:false);document.removeEventListener('keydown',escHandler);}};
+    document.addEventListener('keydown',escHandler);
+    // foca no input ou no botão confirm
+    setTimeout(()=>{
+      if(input){overlay.querySelector('#gdi-modal-input').focus();}
+      else{overlay.querySelector('.gdi-modal-confirm').focus();}
+    },50);
+  });
+};
+function escModal(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ═══ HELPER GLOBAL: SANITIZAÇÃO HTML (anti-XSS) ═══
+// Usado por todos os renderMd() dos módulos para evitar XSS via LLM
+// ou resumos compartilhados. Tenta DOMPurify se disponível; senão,
+// faz uma sanitização básica removendo tags perigosas.
+window.gdiSanitize = window.gdiSanitize || function(html){
+  if(window.DOMPurify){
+    try{return window.DOMPurify.sanitize(html,{ALLOWED_TAGS:['h1','h2','h3','h4','h5','h6','p','br','hr','ul','ol','li','strong','em','b','i','u','s','code','pre','blockquote','table','thead','tbody','tr','th','td','a','img','span','div','sup','sub','mark','del','ins'],ALLOWED_ATTR:['href','src','alt','title','class','target','rel','width','height','colspan','rowspan']});}catch(_){return html;}
+  }
+  // fallback básico: remove <script>, on* handlers, javascript: URLs
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi,'')
+    .replace(/<style[\s\S]*?<\/style>/gi,'')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi,'')
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi,'')
+    .replace(/\son\w+\s*=\s*'[^']*'/gi,'')
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi,'')
+    .replace(/(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi,'$1="#"');
+};
+// auto-load DOMPurify do CDN se não estiver presente
+if(!window.DOMPurify && !window.__gdiPurifyLoading){
+  window.__gdiPurifyLoading=true;
+  const s=document.createElement('script');
+  s.src='https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js';
+  s.crossOrigin='anonymous';
+  s.onload=()=>console.log('[GDI] DOMPurify carregado');
+  s.onerror=()=>console.warn('[GDI] DOMPurify falhou — usando fallback básico');
+  document.head.appendChild(s);
+}
+
 // ── CSS dos módulos (injetado 1×) ──
 (function(){if(document.getElementById('gdi-extras-style'))return;const s=document.createElement('style');s.id='gdi-extras-style';s.textContent=`
 .gdi-debug-wrap{width:100%;background:#0d1117;border-top:2px solid #f0883e;font-family:monospace;font-size:12px;}
@@ -256,6 +430,28 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
           GDIUser.setLast(LAST_KEY());
         }catch(_){}
         Bus.emit('watched:changed');
+        // ★ dispara checagem de conquistas
+        if(window.gdiAchievements){
+          try{
+            const d=window.GDIUser&&GDIUser.dump?GDIUser.dump():{};
+            const w=d.watched||{};
+            // streak (já calculado em M22, mas recalcular aqui por segurança)
+            const acts={};const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
+            for(const k in w)touch(w[k]&&w[k].at);
+            let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
+            if(!has(dd))dd.setDate(dd.getDate()-1);
+            while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
+            window.gdiAchievements.checkAll({
+              watched:Object.keys(w).length,
+              streak:streak,
+              cardsStudied:parseInt(localStorage.getItem('gdi-cards-studied-count')||'0'),
+              simulados:parseInt(localStorage.getItem('gdi-simulados-count')||'0'),
+              goalMet:false,
+              cardsCreated:(JSON.parse(localStorage.getItem('gdi-cards-v1')||'[]')).length,
+              summaries:(JSON.parse(localStorage.getItem('gdi-isa-summaries-v1')||'[]')).length
+            });
+          }catch(_){}
+        }
       }
     });
     el.addEventListener('loadedmetadata',()=>{
@@ -1253,8 +1449,9 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
   }
 
   // ── Render Markdown (uses marked if available, fallback to <br>) ──
+  // ★ XSS-safe: sempre passa por gdiSanitize (DOMPurify)
   function renderMd(txt){
-    if(window.marked){try{return marked.parse(txt);}catch(_){}}
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return esc(txt).replace(/\n/g,'<br>');
   }
 
@@ -1387,8 +1584,34 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
   }
 
   // ── Drive cache (GET/POST /api/ai/cache) ──
+  // ★ Sprint 4: agora tenta primeiro os endpoints granulares opcionais
+  //   /api/ai/summaries, /api/ai/flashcards, /api/ai/questions
+  //   Se falhar (worker antigo), cai para o cache unificado /api/ai/cache.
+  //   Isso permite migração gradual: worker novo = 4 arquivos; worker antigo = 1.
+  const GRANULAR_AVAILABLE = (function(){
+    // detecta uma vez se endpoints granulares existem (HEAD request)
+    let _checked=null;
+    return async function(){
+      if(_checked!==null)return _checked;
+      try{
+        const r=await fetch('/api/ai/summaries?probe=1',{method:'HEAD'});
+        _checked=r.ok;
+      }catch(_){_checked=false;}
+      return _checked;
+    };
+  })();
+
   async function cacheGet(){
     try{
+      // ★ tenta endpoint granular primeiro (summaries)
+      const granular=await GRANULAR_AVAILABLE();
+      if(granular){
+        const r=await fetch('/api/ai/summaries?key='+encodeURIComponent(lessonKey()),{cache:'no-store'});
+        const d=await r.json();
+        if(d&&d.ok&&d.cached)return d.cached;
+        return null;
+      }
+      // fallback: cache unificado antigo
       const r=await fetch('/api/ai/cache?key='+encodeURIComponent(lessonKey()),{cache:'no-store'});
       const d=await r.json();
       return (d&&d.ok&&d.cached)?d.cached:null;
@@ -1403,7 +1626,10 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
         const existing=await cacheGet();
         mindmapToSave=(existing&&existing.mindmap)||null;
       }
-      await fetch('/api/ai/cache',{method:'POST',headers:{'Content-Type':'application/json'},
+      // ★ tenta endpoint granular primeiro; senão, cache unificado
+      const granular=await GRANULAR_AVAILABLE();
+      const endpoint=granular?'/api/ai/summaries':'/api/ai/cache';
+      await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({key:lessonKey(),summary,questions,mindmap:mindmapToSave,lessonName})});
     }catch(_){/* não bloqueia o fluxo se o cache falhar */}
   }
@@ -1474,6 +1700,9 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
   // path: URL pathname como "/0:/Direito Constitucional/Aula 02.mp4"
   // Retorna {discipline, theme} — usado pela biblioteca de flashcards (M9)
   function extractDisciplineTheme(card){
+    // ★ prioridade 1: subject/theme explícitos (matéria manual)
+    if(card.subject&&card.theme)return{discipline:card.subject,theme:card.theme};
+    if(card.subject)return{discipline:card.subject,theme:card.theme||'Geral'};
     let discipline='Geral',theme='Geral';
     const path=card.path||'';
     const lessonName=card.lesson||((card.src||'').replace(/^ISA:/,'').replace(/^manual:/,''))||'';
@@ -1512,6 +1741,21 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
   function normPath(p){try{return decodeURIComponent(String(p||''))}catch(_){return String(p||'')}}
   function stripExt(s){return String(s||'').replace(/\.[a-z0-9]{1,5}$/i,'').trim()};
 
+  // ★ Sistema de Matérias manuais (substitui heurística quando aplicável)
+  const LS_SUBJECTS='gdi-subjects-v1';
+  function getSubjects(){return lsGet(LS_SUBJECTS,[]);}
+  function saveSubject(subj){
+    const arr=getSubjects();
+    const idx=arr.findIndex(s=>s.id===subj.id);
+    if(idx>=0)arr[idx]=subj;else arr.push(subj);
+    lsSet(LS_SUBJECTS,arr);
+  }
+  function deleteSubject(id){
+    lsSet(LS_SUBJECTS,getSubjects().filter(s=>s.id!==id));
+  }
+  // expor para outros módulos
+  window.gdiSubjects={get:getSubjects,save:saveSubject,delete:deleteSubject,LS:LS_SUBJECTS};
+
   // ── GERAÇÃO EM CADEIA: resumo + pílulas + questões ──
   // Qualquer aba clicada (Resumo/Questões/Pílulas) dispara a geração
   // dos 3 em cadeia se ainda não existirem. Cada um é salvo no Drive.
@@ -1519,6 +1763,15 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
 
   // Cache em memória para evitar regenerar na mesma sessão
   let _chainCache={};
+  // ★ Sprint 6: LRU no _chainCache (limita a 5 aulas em memória)
+  const _chainCacheMax=5;
+  function _chainCacheEvict(){
+    const keys=Object.keys(_chainCache);
+    if(keys.length>_chainCacheMax){
+      // remove o mais antigo (primeiro inserido — aproximação LRU)
+      delete _chainCache[keys[0]];
+    }
+  }
 
   // Extrai questões que já existem dentro do PDF (lista de exercícios)
   function extractQuestionsFromText(text){
@@ -1551,7 +1804,7 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
 
     // verifica cache do Drive PRIMEIRO (antes de extrair PDF)
     const cached=await cacheGet();
-    if(!_chainCache[key])_chainCache[key]={};
+    if(!_chainCache[key]){_chainCache[key]={};_chainCacheEvict();}
     if(cached){
       _chainCache[key].summary=cached.summary||null;
       _chainCache[key].mindmap=cached.mindmap||null;
@@ -1588,22 +1841,32 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
     let allText='';
     const pdfTexts=[];
     const pdfErrors=[]; // ★ coleta erros por PDF para diagnóstico
-    for(const item of items){
+    // ★ Sprint 6: paraleliza extração (era sequencial, demorava 4x mais)
+    if(progressCb)progressCb({phase:'extract-start',total:items.length});
+    const results=await Promise.allSettled(items.map(async item=>{
       try{
         if(progressCb)progressCb({phase:'extract',pdf:item.name});
         const txt=await extractPdfText(item.url,(p)=>{
           if(progressCb)progressCb(Object.assign({pdf:item.name},p));
         });
-        if(txt&&txt.trim().length>50){
-          allText+=(allText?'\n\n---\n\n':'')+txt;
-          pdfTexts.push({name:item.name,text:txt});
-        }
+        return {name:item.name,text:txt};
       }catch(e){
-        // ★ guarda o erro com nome do PDF para mostrar depois
-        pdfErrors.push({name:item.name,error:e.message||String(e),url:item.url});
-        console.warn('[Meggy] PDF falhou:',item.name,e.message);
+        throw {name:item.name,error:e.message||String(e),url:item.url};
       }
-    }
+    }));
+    results.forEach(r=>{
+      if(r.status==='fulfilled'){
+        const {name,text}=r.value;
+        if(text&&text.trim().length>50){
+          allText+=(allText?'\n\n---\n\n':'')+text;
+          pdfTexts.push({name,text});
+        }
+      }else{
+        const err=r.reason||{};
+        pdfErrors.push({name:err.name||'PDF',error:err.error||'erro',url:err.url||''});
+        console.warn('[Meggy] PDF falhou:',err.name,err.error);
+      }
+    });
     if(!allText||allText.trim().length<50){
       // ★ Mensagem detalhada com os erros de cada PDF
       let detail='Não foi possível extrair texto dos PDFs.';
@@ -1946,7 +2209,7 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
             if(window.__gdiGradeQ)window.__gdiGradeQ(q.id,false);
           }
           if(idx+1<queue.length){idx++;draw();}
-          else{idx++;draw();} // vai pro resultado
+          else{idx++;draw();}  // ★ Sprint 6: simplificado — ambos os ramos fazem o mesmo
         };
       }
       const optsEl=bodyEl.querySelector('#gdi-q-opts');
@@ -2130,10 +2393,19 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
             <button id="gdi-fc-add-toggle" class="gdi-mode-btn" title="Adicionar flashcard"><i class="bi bi-plus-lg"></i></button>
           </div>
         </div>
-        <div id="gdi-fc-add-form" class="gdi-fc-add-form" style="display:none;">
-          <input id="gdi-fc-add-f" placeholder="Frente (pergunta)" />
-          <input id="gdi-fc-add-b" placeholder="Verso (resposta)" />
-          <button id="gdi-fc-add-save" class="gdi-btn gdi-btn-primary"><i class="bi bi-check-lg"></i> Salvar</button>
+        <div id="gdi-fc-add-form" class="gdi-fc-add-form" style="display:none;flex-direction:column;gap:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="gdi-fc-add-subject" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;flex:1;min-width:140px;">
+              <option value="">Matéria (opcional)</option>
+            </select>
+            <input id="gdi-fc-add-theme" placeholder="Tema (opcional)" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;flex:1;min-width:140px;" />
+          </div>
+          <input id="gdi-fc-add-f" placeholder="Frente (pergunta)" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box;" />
+          <input id="gdi-fc-add-b" placeholder="Verso (resposta)" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:8px 10px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box;" />
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="gdi-fc-add-save" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-check-lg"></i> Salvar</button>
+            <button id="gdi-fc-add-save-next" class="gdi-mode-btn" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Salvar e adicionar próximo</button>
+          </div>
         </div>
         <div class="gdi-fc-disciplines"></div>
       </div>`;
@@ -2288,30 +2560,101 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
     // ── Add form toggle ──
     const addToggle = bodyEl.querySelector('#gdi-fc-add-toggle');
     const addForm = bodyEl.querySelector('#gdi-fc-add-form');
+    // ★ popula select de matérias
+    const subjectSel = bodyEl.querySelector('#gdi-fc-add-subject');
+    if(subjectSel && window.gdiSubjects){
+      const subs=window.gdiSubjects.get();
+      subs.forEach(s=>{
+        const opt=document.createElement('option');
+        opt.value=s.name;
+        opt.textContent=(s.icon||'')+s.name;
+        subjectSel.appendChild(opt);
+      });
+    }
     if(addToggle) addToggle.onclick = ()=>{
       const open = addForm.style.display !== 'none';
       addForm.style.display = open ? 'none' : 'flex';
+      if(!open){
+        const fEl=bodyEl.querySelector('#gdi-fc-add-f');
+        if(fEl)setTimeout(()=>fEl.focus(),50);
+      }
     };
-    const addSave = bodyEl.querySelector('#gdi-fc-add-save');
-    if(addSave) addSave.onclick = ()=>{
-      const f = bodyEl.querySelector('#gdi-fc-add-f').value.trim();
-      const b = bodyEl.querySelector('#gdi-fc-add-b').value.trim();
-      if(!f || !b){ showToast('Preencha frente e verso'); return; }
+    function saveNewCard(keepForm){
+      const fEl=bodyEl.querySelector('#gdi-fc-add-f');
+      const bEl=bodyEl.querySelector('#gdi-fc-add-b');
+      const subjEl=bodyEl.querySelector('#gdi-fc-add-subject');
+      const themeEl=bodyEl.querySelector('#gdi-fc-add-theme');
+      if(!fEl||!bEl){return;}
+      const f=fEl.value.trim();
+      const b=bEl.value.trim();
+      if(!f||!b){ showToast('Preencha frente e verso'); return; }
+      const subject=subjEl?subjEl.value.trim():'';
+      const theme=themeEl?themeEl.value.trim():'';
       const cards = lsGet('gdi-cards-v1', []);
-      cards.push({id:uid(), f, b, due:Date.now()+86400000, box:0, src:'manual:'+lesson, path:urlPath, lesson:lesson, createdAt:Date.now()});
+      const cardData={
+        id:uid(), f, b,
+        due:Date.now()+86400000,
+        box:0,
+        src:'manual:'+lesson,
+        path:urlPath,
+        lesson:lesson,
+        createdAt:Date.now()
+      };
+      if(subject)cardData.subject=subject;
+      if(theme)cardData.theme=theme;
+      cards.push(cardData);
       lsSet('gdi-cards-v1', cards);
       showToast('Flashcard adicionado!');
-      flashcards(items, bodyEl, lessonName);
-    };
+      if(keepForm){
+        fEl.value='';bEl.value='';
+        fEl.focus();
+        // re-renderiza a lista mantendo o formulário aberto
+        flashcards(items, bodyEl, lessonName);
+        // re-abre o form (flashcards re-renderizou fechado)
+        setTimeout(()=>{
+          const newForm=bodyEl.querySelector('#gdi-fc-add-form');
+          const newToggle=bodyEl.querySelector('#gdi-fc-add-toggle');
+          if(newForm)newForm.style.display='flex';
+          // restaurar subject/theme selecionados
+          const newSubj=bodyEl.querySelector('#gdi-fc-add-subject');
+          const newTheme=bodyEl.querySelector('#gdi-fc-add-theme');
+          if(newSubj&&subject)newSubj.value=subject;
+          if(newTheme)newTheme.value=theme;
+          const newF=bodyEl.querySelector('#gdi-fc-add-f');
+          if(newF)newF.focus();
+        },100);
+      }else{
+        flashcards(items, bodyEl, lessonName);
+      }
+    }
+    const addSave = bodyEl.querySelector('#gdi-fc-add-save');
+    if(addSave) addSave.onclick = ()=>saveNewCard(false);
+    const addSaveNext = bodyEl.querySelector('#gdi-fc-add-save-next');
+    if(addSaveNext) addSaveNext.onclick = ()=>saveNewCard(true);
+    // ★ Enter no campo "verso" salva e adiciona próximo
+    const addB=bodyEl.querySelector('#gdi-fc-add-b');
+    if(addB)addB.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();saveNewCard(true);}});
   }
 
   // ── Sessão de estudo de flashcards (vira o card) ──
   // ★FIX v2: usa o mesmo design flip 3D da biblioteca — visual consistente.
   function runFlashcardSession(bodyEl,lesson,queue,items,lessonName){
+    // ★ guard contra fila vazia (NaN% acerto)
+    if(!queue||!queue.length){
+      bodyEl.innerHTML=`<div class="gdi-mat-isa-result" style="text-align:center;padding:30px;">
+        <div style="font-size:48px;">📭</div>
+        <h3 style="color:var(--ferreto-primary,#ff8b9f);font-family:var(--ferreto-font-display,'Poppins',sans-serif);">Nenhum flashcard</h3>
+        <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin-top:8px;">Esta disciplina/tema não tem cards para estudar.</p>
+        <button id="gdi-fc-back-list" class="gdi-btn gdi-btn-primary" style="margin-top:14px;"><i class="bi bi-arrow-left"></i> Voltar aos flashcards</button>
+      </div>`;
+      const back=bodyEl.querySelector('#gdi-fc-back-list');
+      if(back)back.onclick=()=>flashcards(items,bodyEl,lessonName);
+      return;
+    }
     let idx=0,hits=0,misses=0;
     function draw(){
       if(idx>=queue.length){
-        const pct=Math.round(hits/queue.length*100);
+        const pct=queue.length?Math.round(hits/queue.length*100):0;
         bodyEl.innerHTML=`<div class="gdi-mat-isa-result" style="max-width:760px;text-align:center;">
           <div style="font-size:48px;">${pct>=60?'🎉':'📚'}</div>
           <h3 style="color:var(--ferreto-primary,#ff8b9f);font-family:var(--ferreto-font-display,'Poppins',sans-serif);">Sessão concluída!</h3>
@@ -2319,7 +2662,8 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
           <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${esc(lesson)}</p>
           <button id="gdi-fc-back-list" class="gdi-btn gdi-btn-primary" style="margin-top:14px;"><i class="bi bi-arrow-left"></i> Voltar aos flashcards</button>
         </div>`;
-        bodyEl.querySelector('#gdi-fc-back-list').onclick=()=>flashcards(items,bodyEl,lessonName);
+        const back=bodyEl.querySelector('#gdi-fc-back-list');
+        if(back)back.onclick=()=>flashcards(items,bodyEl,lessonName);
         return;
       }
       const c=queue[idx];
@@ -2345,11 +2689,22 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
           </div>
         </div>
         <div id="gdi-fc-grade" class="gdi-fc-session-grade" style="display:none;">
-          <p>Você sabia a resposta?</p>
+          <p>Como foi?</p>
           <div class="gdi-fc-grade-btns">
-            <button id="gdi-fc-no" class="gdi-mode-btn gdi-fc-btn-no"><i class="bi bi-x-circle"></i> Não sabia</button>
-            <button id="gdi-fc-yes" class="gdi-btn gdi-btn-primary gdi-fc-btn-yes"><i class="bi bi-check-circle"></i> Sabia!</button>
+            <button id="gdi-fc-again" class="gdi-mode-btn gdi-fc-btn-again" title="Não sabia (1)">
+              <i class="bi bi-arrow-counterclockwise"></i> Não sabia<br><small>+1d</small>
+            </button>
+            <button id="gdi-fc-hard" class="gdi-mode-btn gdi-fc-btn-hard" title="Quase (2)">
+              <i class="bi bi-dash-circle"></i> Quase<br><small>+3d</small>
+            </button>
+            <button id="gdi-fc-good" class="gdi-btn gdi-btn-primary gdi-fc-btn-good" title="Sabia (3)">
+              <i class="bi bi-check-circle"></i> Sabia<br><small>+${window.gdiSrsIntervals?window.gdiSrsIntervals[1]:3}d</small>
+            </button>
+            <button id="gdi-fc-easy" class="gdi-mode-btn gdi-fc-btn-easy" title="Fácil (4)">
+              <i class="bi bi-stars"></i> Fácil<br><small>+${Math.round((window.gdiSrsIntervals?window.gdiSrsIntervals[2]:7)*1.5)}d</small>
+            </button>
           </div>
+          <p style="font-size:10px;color:var(--ferreto-text-muted,#8b949e);margin-top:8px;">Atalhos: 1 2 3 4 · Espaço vira</p>
         </div>
         <div class="gdi-fc-session-foot">
           <button id="gdi-fc-skip" title="Pular" class="gdi-fc-skip-btn"><i class="bi bi-arrow-right"></i></button>
@@ -2363,27 +2718,75 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
         if(flipped)return;flipped=true;
         card.classList.add('gdi-fc-flipped');
         grade.style.display='block';
+        // foca no botão "Good" para Enter funcionar
+        const goodBtn=bodyEl.querySelector('#gdi-fc-good');
+        if(goodBtn)setTimeout(()=>goodBtn.focus(),100);
       };
-      // sabia / não sabia
-      bodyEl.querySelector('#gdi-fc-yes').onclick=()=>{
-        hits++;
-        // atualiza SRS do flashcard (box+1, due = +7 dias)
+      // ★ SRS unificado via gdiGradeCard (SM-2 simplificado)
+      const gradeCard=(quality)=>{
         const cards=lsGet('gdi-cards-v1',[]);
         const ci=cards.findIndex(x=>x.id===c.id);
-        if(ci>=0){cards[ci].box=Math.min(4,(cards[ci].box||0)+1);cards[ci].due=Date.now()+[1,3,7,21,60][cards[ci].box]*86400000;lsSet('gdi-cards-v1',cards);}
+        if(ci>=0){
+          const result=window.gdiGradeCard(cards[ci],quality);
+          cards[ci].box=result.box;
+          cards[ci].due=result.due;
+          cards[ci].lastReview=result.lastReview;
+          lsSet('gdi-cards-v1',cards);
+        }
+        if(quality===1)misses++;      // Again
+        else if(quality===3)hits++;   // Good
+        else if(quality===4)hits++;   // Easy
+        // ★ contador de cards estudados (para conquistas)
+        try{
+          const n=parseInt(localStorage.getItem('gdi-cards-studied-count')||'0')+1;
+          localStorage.setItem('gdi-cards-studied-count',String(n));
+          // dispara checagem de conquistas
+          if(window.gdiAchievements){
+            window.gdiAchievements.checkAll({cardsStudied:n,cardsCreated:cards.length});
+          }
+        }catch(_){}
         idx++;draw();
       };
-      bodyEl.querySelector('#gdi-fc-no').onclick=()=>{
-        misses++;
-        const cards=lsGet('gdi-cards-v1',[]);
-        const ci=cards.findIndex(x=>x.id===c.id);
-        if(ci>=0){cards[ci].box=0;cards[ci].due=Date.now()+86400000;lsSet('gdi-cards-v1',cards);}
-        idx++;draw();
-      };
+      bodyEl.querySelector('#gdi-fc-again').onclick=()=>gradeCard(1);
+      bodyEl.querySelector('#gdi-fc-hard').onclick=()=>gradeCard(2);
+      bodyEl.querySelector('#gdi-fc-good').onclick=()=>gradeCard(3);
+      bodyEl.querySelector('#gdi-fc-easy').onclick=()=>gradeCard(4);
       // pular
       bodyEl.querySelector('#gdi-fc-skip').onclick=()=>{idx++;draw();};
+      // ★ atalhos de teclado (1/2/3/4 + espaço para virar)
+      const keyHandler=(e)=>{
+        if(!grade.style.display||grade.style.display==='none'){
+          if(e.code==='Space'){e.preventDefault();card.click();}
+          return;
+        }
+        if(e.key==='1'){e.preventDefault();gradeCard(1);}
+        else if(e.key==='2'){e.preventDefault();gradeCard(2);}
+        else if(e.key==='3'){e.preventDefault();gradeCard(3);}
+        else if(e.key==='4'){e.preventDefault();gradeCard(4);}
+      };
+      document.addEventListener('keydown',keyHandler);
+      // limpar listener ao trocar de card (guarda para cleanup)
+      if(!bodyEl.__fcKeyCleanup){
+        bodyEl.__fcKeyCleanup=()=>{
+          document.removeEventListener('keydown',keyHandler);
+        };
+      }else{
+        bodyEl.__fcKeyCleanup();
+        bodyEl.__fcKeyCleanup=()=>{
+          document.removeEventListener('keydown',keyHandler);
+        };
+      }
     }
     draw();
+    // cleanup final quando sessão terminar (idx>=queue.length)
+    const _origDraw=draw;
+    draw=function(){
+      _origDraw();
+      if(idx>=queue.length&&bodyEl.__fcKeyCleanup){
+        bodyEl.__fcKeyCleanup();
+        bodyEl.__fcKeyCleanup=null;
+      }
+    };
   }
 
   // ── Regenerate: força regeração de tudo (limpa cache em memória + Drive) ──
@@ -2888,7 +3291,7 @@ body.gdi-fv .gdi-player-wrap iframe{
             cfg.short=clamp(parseInt($id('gdi-pom-c-short').value)||5,1,30);
             cfg.long=clamp(parseInt($id('gdi-pom-c-long').value)||15,1,60);
             cfg.sessions=clamp(parseInt($id('gdi-pom-c-sess').value)||4,1,10);
-            localStorage.setItem(CKEY,JSON.stringify(cfg));
+            try{localStorage.setItem(CKEY,JSON.stringify(cfg));}catch(_){showToast('Erro ao salvar config');}
             if($id('gdi-pom-c-work'))$id('gdi-pom-c-work').value=cfg.work;
             if($id('gdi-pom-c-short'))$id('gdi-pom-c-short').value=cfg.short;
             if($id('gdi-pom-c-long'))$id('gdi-pom-c-long').value=cfg.long;
@@ -2898,7 +3301,7 @@ body.gdi-fv .gdi-player-wrap iframe{
         }
       });
       const autoChk=$id('gdi-pom-c-auto');
-      if(autoChk&&!autoChk.__pomBound){autoChk.__pomBound=true;autoChk.addEventListener('change',e=>{cfg.autoStart=e.target.checked;localStorage.setItem(CKEY,JSON.stringify(cfg));});}
+      if(autoChk&&!autoChk.__pomBound){autoChk.__pomBound=true;autoChk.addEventListener('change',e=>{cfg.autoStart=e.target.checked;try{localStorage.setItem(CKEY,JSON.stringify(cfg));}catch(_){}});}
     }
     // binda imediatamente + após injetar
     setTimeout(bindPomClicks,50);
@@ -3295,7 +3698,7 @@ body.gdi-fv .gdi-player-wrap iframe{
       .slice(0,30);
     (async()=>{
       for(const row of rows){
-        if(!document.body.contains(row))return;
+        if(!document.body.contains(row))continue;  // ★FIX: era return, interrompia o loop todo
         const href=row.getAttribute('href')||'';
         if(!href||href.startsWith('/fallback'))continue;
         const files=await gdiListAllFiles(href,gdiGetPw(href));
@@ -3485,8 +3888,15 @@ body.gdi-fv .gdi-player-wrap iframe{
         $("#pdf-spinner").html(`<div class="gdi-alert gdi-alert-error">Could not load PDF: ${u.message}</div>`);
       }),
       document.getElementById("pdf-prev").addEventListener("click",function(){o>1&&(o--,$("#pdf-spinner").show(),f(o))}),
-      document.getElementById("pdf-next").addEventListener("click",function(){d&&o<d.numPages&&(o++,$("#pdf-spinner").show(),f(o))}),
-      document.getElementById("pdf-zoom").addEventListener("input",function(){s=parseInt(this.value)/100,document.getElementById("pdf-zoom-val").textContent=this.value+"%",f(o)});
+      document.getElementById("pdf-next").addEventListener("click",function(){d&&o<d.numPages&&(o++,$("#pdf-spinner").show(),f(o))});
+      // ★ debounce no zoom (evita re-render a cada pixel do slider)
+      let _zoomTimer=null;
+      document.getElementById("pdf-zoom").addEventListener("input",function(){
+        s=parseInt(this.value)/100;
+        document.getElementById("pdf-zoom-val").textContent=this.value+"%";
+        if(_zoomTimer)clearTimeout(_zoomTimer);
+        _zoomTimer=setTimeout(()=>{f(o);_zoomTimer=null;},150);
+      });
     }
     if(typeof pdfjsLib<"u")r();
     else{
@@ -3717,7 +4127,8 @@ window.GDI_MODULES.push({name:'debug',init:function(){
       fBtn.innerHTML='<i class="bi bi-funnel'+(on?'-fill':'')+'"></i>';};
     fBtn.addEventListener('click',()=>{
       const on=localStorage.getItem(LS_HIDE)==='1';
-      localStorage.setItem(LS_HIDE,on?'0':'1');fSync();renderItems();});
+      try{localStorage.setItem(LS_HIDE,on?'0':'1');}catch(_){}
+      fSync();renderItems();});
     fSync();
     wrap.querySelector('#gdi-pl-reload').addEventListener('click',()=>{
       try{localStorage.removeItem('gdi-xpl::'+(window.location.host||'')+'::'+parentPath())}catch(_){}
@@ -4595,7 +5006,13 @@ window.GDI_MODULES.push({name:'debug',init:function(){
     renderPanel();
     ensureState().then(()=>{if(panel&&panel.style.display!=='none')renderPanel();});
   }
-  function closePanel(){FC.active=false;if(panel)panel.style.display='none';}
+  function closePanel(){
+    FC.active=false;
+    // ★ limpa timer do simulado se ativo (evita salvar simulado fantasma)
+    const body=panel&&panel.querySelector('#gdi-central-body');
+    if(body&&body.__simTimer){clearInterval(body.__simTimer);body.__simTimer=null;}
+    if(panel)panel.style.display='none';
+  }
   // ★ Expõe openPanel para outros módulos (ex.: M9-ISA botão "Resolver
   // agora →" pode abrir a Central na aba Questões como fallback).
   window.__gdiOpenCentral=openPanel;
@@ -4608,7 +5025,7 @@ window.GDI_MODULES.push({name:'debug',init:function(){
         <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">Meta hoje: ${fmtMin(t)}/${fmtMin(g)}</span>
         <div style="flex:1;max-width:160px;height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.1));border-radius:3px;overflow:hidden;"><div style="height:6px;width:${pct}%;background:${t>=g?'#2f9e44':'var(--ferreto-grad)'};"></div></div>
         <input id="gdi-goal-set" type="number" min="10" max="480" value="${g}" title="Meta di\u00e1ria (minutos)" style="width:56px;background:var(--ferreto-surface-2,rgba(255,255,255,.07));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#f0f6fc);text-align:center;padding:3px 5px;font-size:12px;">
-        <button class="gdi-mode-btn" id="gdi-central-x" style="padding:4px 10px;">\u2715</button>
+        <button class="gdi-mode-btn" id="gdi-central-x" style="padding:4px 10px;margin-left:auto;order:99;" title="Fechar (Esc)">\u2715</button>
       </div>
       <div class="gdi-central-tabs">
         <button class="gdi-central-tab ${tab==='cursos'?'active':''}" data-t="cursos">\ud83d\udccd Meus Cursos</button>
@@ -4622,6 +5039,9 @@ window.GDI_MODULES.push({name:'debug',init:function(){
         <button class="gdi-central-tab ${tab==='radar'?'active':''}" data-t="radar">\ud83c\udfaf Mapa de Fracos</button>
         <button class="gdi-central-tab ${tab==='stats'?'active':''}" data-t="stats">\ud83d\udcca Estat\u00edsticas</button>
         <button class="gdi-central-tab ${tab==='fc'?'active':''}" data-t="fc">\ud83e\uddf0 Flashcards</button>
+        <button class="gdi-central-tab ${tab==='subjects'?'active':''}" data-t="subjects">\ud83d\udcdd Mat\u00e9rias</button>
+        <button class="gdi-central-tab ${tab==='trails'?'active':''}" data-t="trails">\ud83c\udfaft Trilhas</button>
+        <button class="gdi-central-tab ${tab==='achievements'?'active':''}" data-t="achievements">\ud83c\udfc6 Conquistas</button>
         <button class="gdi-central-tab ${tab==='mar'?'active':''}" data-t="mar">\ud83d\ude80 Maratona</button>
       </div>
       <div class="gdi-central-body" id="gdi-central-body"></div>
@@ -4631,7 +5051,12 @@ window.GDI_MODULES.push({name:'debug',init:function(){
       const v=Math.max(10,Math.min(480,parseInt(e.target.value,10)||60));
       lsSet(LS_GOAL,v);renderPanel();
     });
-    panel.querySelectorAll('.gdi-central-tab').forEach(b=>b.onclick=()=>{tab=b.dataset.t;FC.active=false;renderPanel();});
+    panel.querySelectorAll('.gdi-central-tab').forEach(b=>b.onclick=()=>{
+      // ★ limpa timer do simulado ao trocar de aba
+      const body=panel.querySelector('#gdi-central-body');
+      if(body&&body.__simTimer){clearInterval(body.__simTimer);body.__simTimer=null;}
+      tab=b.dataset.t;FC.active=false;renderPanel();
+    });
     const body=panel.querySelector('#gdi-central-body');
     if(tab==='cursos')renderCursos(body);
     else if(tab==='questoes')renderQuestoes(body);
@@ -4644,7 +5069,309 @@ window.GDI_MODULES.push({name:'debug',init:function(){
     else if(tab==='radar'){if(window.renderRadar)window.renderRadar(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de radar indispon\u00edvel.</div>';}
     else if(tab==='stats')renderStats(body);
     else if(tab==='fc')renderFlash(body);
+    else if(tab==='subjects')renderSubjects(body);
+    else if(tab==='trails')renderTrails(body);
+    else if(tab==='achievements')renderAchievements(body);
     else renderMarathon(body);
+  }
+
+  // ★ Aba "Trilhas" — agrupar cursos em uma meta
+  function renderTrails(box){
+    if(!window.gdiTrails){
+      box.innerHTML='<div class="gdi-notes-empty">Sistema de trilhas indisponível.</div>';
+      return;
+    }
+    const trails=window.gdiTrails.get();
+    box.innerHTML=`<div style="max-width:760px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;">Trilhas de Estudo</b>
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Agrupe cursos e matérias em uma meta. Ex: "Auditor Fiscal" = Direito Tributário + Contabilidade + Português.</p>
+        </div>
+        <button id="gdi-trail-add" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Nova trilha</button>
+      </div>
+      <div id="gdi-trail-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>`;
+    const list=box.querySelector('#gdi-trail-list');
+    function drawList(){
+      const all=window.gdiTrails.get();
+      if(!all.length){
+        list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-signpost-2" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma trilha criada.<br><span style="font-size:12px;">Clique em "Nova trilha" para organizar seus cursos em uma meta.</span></div>';
+        return;
+      }
+      list.innerHTML='';
+      all.forEach(t=>{
+        const total=t.courses?t.courses.length:0;
+        const el=document.createElement('div');
+        el.className='gdi-note';
+        el.style.cssText='display:flex;align-items:center;gap:12px;padding:14px;cursor:pointer;';
+        el.innerHTML=`
+          <span style="font-size:28px;flex:none;">${t.icon||'🎯'}</span>
+          <div style="flex:1;min-width:0;">
+            <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${escHtml(t.name)}</b>
+            ${t.description?`<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">${escHtml(t.description)}</small>`:''}
+            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${total} curso${total!==1?'s':''} · meta: ${t.goal||'—'} dias</small>
+          </div>
+          <button class="gdi-mode-btn gdi-trail-edit" data-id="${escHtml(t.id)}" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>
+          <button class="gdi-mode-btn gdi-trail-del" data-id="${escHtml(t.id)}" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>
+        `;
+        list.appendChild(el);
+      });
+      list.querySelectorAll('.gdi-trail-edit').forEach(b=>b.onclick=()=>editTrail(b.dataset.id,box,drawList));
+      list.querySelectorAll('.gdi-trail-del').forEach(b=>b.onclick=async ()=>{
+        const tr=window.gdiTrails.get().find(x=>x.id===b.dataset.id);
+        if(!tr)return;
+        const ok=await window.gdiModal({
+          title:'Excluir trilha',
+          message:'Excluir "'+tr.name+'"? Os cursos vinculados NÃO serão excluídos.',
+          confirmText:'Excluir',
+          cancelText:'Cancelar',
+          danger:true
+        });
+        if(ok){
+          window.gdiTrails.delete(b.dataset.id);
+          showToast('Trilha excluída');
+          drawList();
+        }
+      });
+    }
+    drawList();
+    box.querySelector('#gdi-trail-add').onclick=()=>editTrail(null,box,drawList);
+  }
+  function editTrail(id,box,afterSave){
+    const existing=id?window.gdiTrails.get().find(t=>t.id===id):null;
+    const icons=['🎯','🏆','🚀','⭐','🎓','💼','🏛️','⚖️','📊','🔬','🌍','💡'];
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">${existing?'Editar trilha':'Nova trilha'}</b>
+        <button id="gdi-trail-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome *</label>
+          <input id="gdi-trail-name" placeholder="Ex: Auditor Fiscal 2026" value="${existing?escHtml(existing.name):''}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Descrição (opcional)</label>
+          <input id="gdi-trail-desc" placeholder="Ex: Concurso para Receita Federal" value="${existing?escHtml(existing.description||''):''}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+          <div id="gdi-trail-icons" style="display:flex;gap:6px;flex-wrap:wrap;">${icons.map(ic=>`<button class="gdi-trail-ic" data-ic="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid ${existing&&existing.icon===ic?'var(--ferreto-primary,#ff8b9f)':'var(--ferreto-border,#30363d)'};border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}</div>
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta (dias para terminar)</label>
+          <input id="gdi-trail-goal" type="number" min="1" max="3650" value="${existing?(existing.goal||90):90}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
+        <button id="gdi-trail-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
+        <button id="gdi-trail-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">${existing?'Salvar':'Criar trilha'}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    let selIcon=existing?existing.icon:icons[0];
+    overlay.querySelectorAll('.gdi-trail-ic').forEach(b=>b.onclick=()=>{
+      overlay.querySelectorAll('.gdi-trail-ic').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
+      b.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+      selIcon=b.dataset.ic;
+    });
+    const close=()=>overlay.remove();
+    overlay.querySelector('#gdi-trail-x').onclick=close;
+    overlay.querySelector('#gdi-trail-cancel').onclick=close;
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    overlay.querySelector('#gdi-trail-save').onclick=()=>{
+      const name=overlay.querySelector('#gdi-trail-name').value.trim();
+      if(!name){showToast('Digite o nome da trilha');return;}
+      const desc=overlay.querySelector('#gdi-trail-desc').value.trim();
+      const goal=parseInt(overlay.querySelector('#gdi-trail-goal').value)||90;
+      window.gdiTrails.save({
+        id:existing?existing.id:('trail-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)),
+        name,description:desc,icon:selIcon,goal,
+        courses:existing?existing.courses:[],
+        createdAt:existing?existing.createdAt:Date.now()
+      });
+      close();
+      showToast(existing?'Trilha atualizada':'Trilha criada!');
+      if(afterSave)afterSave();
+    };
+    setTimeout(()=>overlay.querySelector('#gdi-trail-name').focus(),50);
+  }
+
+  // ★ Aba "Conquistas" — gamificação
+  function renderAchievements(box){
+    if(!window.gdiAchievements){
+      box.innerHTML='<div class="gdi-notes-empty">Sistema de conquistas indisponível.</div>';
+      return;
+    }
+    const unlocked=window.gdiAchievements.getUnlocked();
+    const defs=window.gdiAchievements.defs();
+    const total=defs.length;
+    const pct=Math.round(unlocked.length/total*100);
+    box.innerHTML=`<div style="max-width:760px;">
+      <div style="text-align:center;margin-bottom:20px;padding:20px;background:linear-gradient(135deg,rgba(255,139,159,.1),rgba(93,222,218,.06));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;">
+        <div style="font-size:48px;margin-bottom:8px;">🏆</div>
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:18px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">Conquistas</b>
+        <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:6px 0 0;">${unlocked.length} de ${total} desbloqueadas · ${pct}% completo</p>
+        <div style="height:8px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:4px;overflow:hidden;margin:14px auto 0;max-width:300px;">
+          <div style="height:8px;width:${pct}%;background:var(--ferreto-grad);border-radius:4px;transition:width .4s;"></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">
+        ${defs.map(d=>{
+          const isUnlocked=unlocked.includes(d.id);
+          return `<div style="background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid ${isUnlocked?'rgba(63,185,80,.3)':'var(--ferreto-border,#21262d)'};border-radius:12px;padding:14px;text-align:center;${isUnlocked?'':'opacity:.5;'}">
+            <div style="font-size:32px;margin-bottom:6px;${isUnlocked?'':'filter:grayscale(1);'}">${d.icon}</div>
+            <b style="color:${isUnlocked?'#3fb950':'var(--ferreto-text-muted,#8b949e)'};font-size:13px;display:block;">${escHtml(d.title)}</b>
+            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:4px;line-height:1.4;">${escHtml(d.desc)}</small>
+            ${isUnlocked?'<div style="font-size:10px;color:#3fb950;margin-top:6px;font-weight:600;">✓ DESBLOQUEADA</div>':'<div style="font-size:10px;color:var(--ferreto-text-faint,#6b7488);margin-top:6px;">bloqueada</div>'}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  // ★ Aba "Matérias" — gerenciar matérias manuais
+  function renderSubjects(box){
+    if(!window.gdiSubjects){
+      box.innerHTML='<div class="gdi-notes-empty">Sistema de matérias indisponível.</div>';
+      return;
+    }
+    const subs=window.gdiSubjects.get();
+    box.innerHTML=`<div style="max-width:760px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;">Matérias</b>
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Crie matérias para organizar seus flashcards. Ex: "Direito Constitucional", "Português", "Raciocínio Lógico".</p>
+        </div>
+        <button id="gdi-subj-add" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Nova matéria</button>
+      </div>
+      <div id="gdi-subj-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>`;
+    const list=box.querySelector('#gdi-subj-list');
+    function drawList(){
+      const all=window.gdiSubjects.get();
+      if(!all.length){
+        list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-journal-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma matéria criada ainda.<br><span style="font-size:12px;">Clique em "Nova matéria" para começar.</span></div>';
+        return;
+      }
+      // contar cards por matéria
+      const cards=lsGet('gdi-cards-v1',[]);
+      const countByName={};
+      cards.forEach(c=>{if(c.subject)countByName[c.subject]=(countByName[c.subject]||0)+1;});
+      list.innerHTML='';
+      all.forEach(s=>{
+        const count=countByName[s.name]||0;
+        const el=document.createElement('div');
+        el.className='gdi-note';
+        el.style.cssText='display:flex;align-items:center;gap:12px;padding:12px 14px;';
+        el.innerHTML=`
+          <span style="font-size:24px;flex:none;">${s.icon||'📚'}</span>
+          <div style="flex:1;min-width:0;">
+            <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;display:flex;align-items:center;gap:6px;">${escHtml(s.name)}<span style="width:8px;height:8px;border-radius:50%;background:${s.color||'#ff8b9f'};display:inline-block;"></span></b>
+            ${s.notes?`<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">${escHtml(s.notes)}</small>`:''}
+            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${count} card${count!==1?'s':''} · meta: ${s.goal||60} min/dia</small>
+          </div>
+          <button class="gdi-mode-btn gdi-subj-edit" data-id="${escHtml(s.id)}" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>
+          <button class="gdi-mode-btn gdi-subj-del" data-id="${escHtml(s.id)}" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>
+        `;
+        list.appendChild(el);
+      });
+      list.querySelectorAll('.gdi-subj-edit').forEach(b=>b.onclick=()=>editSubject(b.dataset.id,box));
+      list.querySelectorAll('.gdi-subj-del').forEach(b=>b.onclick=async ()=>{
+        const sub=all.find(x=>x.id===b.dataset.id);
+        if(!sub)return;
+        const ok=await window.gdiModal({
+          title:'Excluir matéria',
+          message:'Excluir "'+sub.name+'"? Os flashcards vinculados NÃO serão excluídos — apenas a matéria some da lista.',
+          confirmText:'Excluir',
+          cancelText:'Cancelar',
+          danger:true
+        });
+        if(ok){
+          window.gdiSubjects.delete(b.dataset.id);
+          showToast('Matéria excluída');
+          drawList();
+        }
+      });
+    }
+    drawList();
+    box.querySelector('#gdi-subj-add').onclick=()=>editSubject(null,box,drawList);
+  }
+  function editSubject(id,box,afterSave){
+    const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];
+    const icons=['⚖️','📐','📚','🎯','🧮','📖','🔬','💼','🌍','🏛️','⚙️','🎵','📝','🎨','💻','🏥'];
+    const existing=id?window.gdiSubjects.get().find(s=>s.id===id):null;
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">${existing?'Editar matéria':'Nova matéria'}</b>
+        <button id="gdi-subj-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome *</label>
+          <input id="gdi-subj-name" placeholder="Ex: Direito Constitucional" value="${existing?escHtml(existing.name):''}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+          <div id="gdi-subj-icons" style="display:flex;gap:6px;flex-wrap:wrap;">${icons.map(ic=>`<button class="gdi-subj-ic" data-ic="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid ${existing&&existing.icon===ic?'var(--ferreto-primary,#ff8b9f)':'var(--ferreto-border,#30363d)'};border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}</div>
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
+          <div id="gdi-subj-colors" style="display:flex;gap:6px;flex-wrap:wrap;">${colors.map(c=>`<button class="gdi-subj-cl" data-cl="${c}" style="background:${c};border:${existing&&existing.color===c?'4px':'2px'} solid ${existing&&existing.color===c?'#fff':'transparent'};border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}</div>
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
+          <input id="gdi-subj-goal" type="number" min="10" max="480" value="${existing?(existing.goal||60):60}" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+        </div>
+        <div>
+          <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
+          <textarea id="gdi-subj-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;">${existing?escHtml(existing.notes||''):''}</textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
+        <button id="gdi-subj-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
+        <button id="gdi-subj-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">${existing?'Salvar':'Criar matéria'}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    let selIcon=existing?existing.icon:icons[0];
+    let selColor=existing?existing.color:colors[0];
+    overlay.querySelectorAll('.gdi-subj-ic').forEach(b=>b.onclick=()=>{
+      overlay.querySelectorAll('.gdi-subj-ic').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
+      b.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+      selIcon=b.dataset.ic;
+    });
+    overlay.querySelectorAll('.gdi-subj-cl').forEach(b=>b.onclick=()=>{
+      overlay.querySelectorAll('.gdi-subj-cl').forEach(x=>{x.style.borderWidth='2px';x.style.borderColor='transparent';});
+      b.style.borderWidth='4px';b.style.borderColor='#fff';
+      selColor=b.dataset.cl;
+    });
+    const close=()=>overlay.remove();
+    overlay.querySelector('#gdi-subj-x').onclick=close;
+    overlay.querySelector('#gdi-subj-cancel').onclick=close;
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    overlay.querySelector('#gdi-subj-save').onclick=()=>{
+      const name=overlay.querySelector('#gdi-subj-name').value.trim();
+      if(!name){showToast('Digite o nome da matéria');return;}
+      const goal=parseInt(overlay.querySelector('#gdi-subj-goal').value)||60;
+      const notes=overlay.querySelector('#gdi-subj-notes').value.trim();
+      window.gdiSubjects.save({
+        id:existing?existing.id:('subj-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)),
+        name,icon:selIcon,color:selColor,goal,notes,
+        createdAt:existing?existing.createdAt:Date.now()
+      });
+      close();
+      showToast(existing?'Matéria atualizada':'Matéria criada!');
+      if(afterSave)afterSave();
+    };
+    setTimeout(()=>overlay.querySelector('#gdi-subj-name').focus(),50);
   }
   // ★ Otimização: limpa nome do curso (remove paths crus, underscores, etc)
   function cleanCourseName(ck){
@@ -4672,8 +5399,14 @@ window.GDI_MODULES.push({name:'debug',init:function(){
         </div>`:''}
       </div>`;
       const restoreBtn=box.querySelector('#gdi-restore-courses');
-      if(restoreBtn)restoreBtn.onclick=()=>{
-        if(confirm('Restaurar todos os '+hidden.length+' curso(s) oculto(s)?')){
+      if(restoreBtn)restoreBtn.onclick=async ()=>{
+        const ok=await window.gdiModal({
+          title:'Restaurar cursos',
+          message:'Restaurar todos os '+hidden.length+' curso(s) oculto(s)?',
+          confirmText:'Restaurar',
+          cancelText:'Cancelar'
+        });
+        if(ok){
           lsSet(LS_HIDDEN,[]);
           showToast('Cursos restaurados');
           renderCursos(box);
@@ -4683,19 +5416,61 @@ window.GDI_MODULES.push({name:'debug',init:function(){
     }
     box.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
       <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${cs.length} curso${cs.length>1?'s':''} em andamento</b>
-      ${hidden.length?`<button id="gdi-show-hidden" class="gdi-mode-btn" style="font-size:11px;"><i class="bi bi-eye-slash"></i> ${hidden.length} oculto${hidden.length>1?'s':''}</button>`:''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button id="gdi-add-manual-course" class="gdi-mode-btn" style="font-size:11px;"><i class="bi bi-plus-lg"></i> Adicionar curso</button>
+        ${hidden.length?`<button id="gdi-show-hidden" class="gdi-mode-btn" style="font-size:11px;"><i class="bi bi-eye-slash"></i> ${hidden.length} oculto${hidden.length>1?'s':''}</button>`:''}
+      </div>
     </div>
-    <div class="gdi-courses"></div>`;
+    <div style="margin-bottom:14px;">
+      <input id="gdi-courses-search" type="search" placeholder="Buscar curso..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:9px 12px;font-size:13px;font-family:inherit;" value="${escHtml(box.__search||'')}">
+    </div>
+    <div class="gdi-courses"></div>
+    <div id="gdi-courses-pager" style="margin-top:14px;text-align:center;"></div>`;
     const grid=box.querySelector('.gdi-courses');
+    const pagerEl=box.querySelector('#gdi-courses-pager');
+    const searchInput=box.querySelector('#gdi-courses-search');
 
-    // ★ botão "mostrar ocultos" (no header da lista)
+    // ★ botão "Adicionar curso manual"
+    const addManualBtn=box.querySelector('#gdi-add-manual-course');
+    if(addManualBtn)addManualBtn.onclick=()=>showAddCourseModal(box);
+
+    // ★ botão "mostrar ocultos"
     const showHiddenBtn=box.querySelector('#gdi-show-hidden');
-    if(showHiddenBtn)showHiddenBtn.onclick=()=>{
-      showHiddenCoursesModal(box);
-    };
+    if(showHiddenBtn)showHiddenBtn.onclick=()=>showHiddenCoursesModal(box);
 
-    // Mostra até 20 cursos
-    cs.slice(0,20).forEach(c=>{
+    // ★ busca + paginação
+    const PAGE_SIZE=12;
+    let currentPage=box.__page||0;
+    function applyFilter(){
+      const q=(box.__search||'').toLowerCase().trim();
+      const filtered=q?cs.filter(c=>cleanCourseName(c.key).toLowerCase().includes(q)||driveNameOf(c.key).toLowerCase().includes(q)):cs;
+      const totalPages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));
+      if(currentPage>=totalPages)currentPage=totalPages-1;
+      if(currentPage<0)currentPage=0;
+      const slice=filtered.slice(currentPage*PAGE_SIZE,(currentPage+1)*PAGE_SIZE);
+      // limpar grid
+      grid.innerHTML='';
+      if(!slice.length){
+        grid.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;">'+(q?'Nenhum curso encontrado para "'+escHtml(q)+'"':'Nenhum curso ainda.')+'</div>';
+      }
+      slice.forEach(c=>renderCourseCard(grid,c,box));
+      // paginação
+      if(totalPages>1){
+        pagerEl.innerHTML=`<div style="display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;">
+          <button class="gdi-mode-btn" id="gdi-courses-prev" style="font-size:11px;padding:5px 10px;" ${currentPage===0?'disabled':''}><i class="bi bi-chevron-left"></i> Anterior</button>
+          <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">Página ${currentPage+1} de ${totalPages}</span>
+          <button class="gdi-mode-btn" id="gdi-courses-next" style="font-size:11px;padding:5px 10px;" ${currentPage===totalPages-1?'disabled':''}>Próxima <i class="bi bi-chevron-right"></i></button>
+        </div>
+        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-top:6px;">Mostrando ${slice.length} de ${filtered.length} curso${filtered.length>1?'s':''}${q?' (filtrado por "'+escHtml(q)+'")':''}</div>`;
+        const prev=pagerEl.querySelector('#gdi-courses-prev');
+        const next=pagerEl.querySelector('#gdi-courses-next');
+        if(prev)prev.onclick=()=>{currentPage--;applyFilter();};
+        if(next)next.onclick=()=>{currentPage++;applyFilter();};
+      }else{
+        pagerEl.innerHTML=filtered.length>PAGE_SIZE?`<div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">Mostrando ${slice.length} de ${filtered.length} cursos</div>`:'';
+      }
+    }
+    function renderCourseCard(grid,c,box){
       const name=cleanCourseName(c.key);
       const drive=driveNameOf(c.key);
       const progress=c.lessons.size>0?Math.round(c.watched/c.lessons.size*100):0;
@@ -4728,14 +5503,21 @@ window.GDI_MODULES.push({name:'debug',init:function(){
         }
       });
 
-      // ★ botão remover (ocultar)
+      // botão remover
       const removeBtn=el.querySelector('.gdi-course-remove');
       if(removeBtn){
         removeBtn.onmouseenter=()=>{removeBtn.style.color='#ff8b8b';removeBtn.style.background='rgba(255,107,107,.15)';};
         removeBtn.onmouseleave=()=>{removeBtn.style.color='var(--ferreto-text-muted,#8b949e)';removeBtn.style.background='transparent';};
-        removeBtn.onclick=(e)=>{
+        removeBtn.onclick=async (e)=>{
           e.stopPropagation();
-          if(confirm('Ocultar "'+name+'" da sua lista de cursos?\n\nO curso não será excluído — você pode restaurá-lo depois. Apenas desaparece da lista "Meus Cursos".')){
+          const ok=await window.gdiModal({
+            title:'Ocultar curso',
+            message:'Ocultar "'+name+'" da sua lista de cursos?\n\nO curso não será excluído — você pode restaurá-lo depois.',
+            confirmText:'Ocultar',
+            cancelText:'Cancelar',
+            danger:true
+          });
+          if(ok){
             hideCourse(c.key);
             showToast('Curso ocultado');
             renderCursos(box);
@@ -4743,12 +5525,118 @@ window.GDI_MODULES.push({name:'debug',init:function(){
         };
       }
 
-      // ★ clicar no card (não nos botões) abre detalhes
+      // clicar no card abre detalhes
       el.onclick=(e)=>{
-        if(e.target.closest('button'))return; // não abre detalhes se clicou em botão
+        if(e.target.closest('button'))return;
         openCourseDetail(box,c);
       };
+    }
+    if(searchInput){
+      let _searchTimer=null;
+      searchInput.addEventListener('input',function(){
+        if(_searchTimer)clearTimeout(_searchTimer);
+        _searchTimer=setTimeout(()=>{
+          box.__search=this.value;
+          currentPage=0;
+          box.__page=0;
+          applyFilter();
+        },250);
+      });
+    }
+    applyFilter();
+  }
+
+  // ★ Modal para adicionar curso manualmente
+  function showAddCourseModal(box){
+    const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];
+    const icons=['⚖️','📐','📚','🎯','🧮','📖','🔬','💼','🌍','🏛️','⚙️','🎵'];
+    const html=`<div style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome do curso *</label>
+        <input id="gdi-amc-name" placeholder="Ex: Direito Constitucional para Concurso" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+        <div id="gdi-amc-icons" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${icons.map((ic,i)=>`<button class="gdi-amc-icon-btn" data-icon="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}
+        </div>
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
+        <div id="gdi-amc-colors" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${colors.map((c,i)=>`<button class="gdi-amc-color-btn" data-color="${c}" style="background:${c};border:2px solid transparent;border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}
+        </div>
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
+        <input id="gdi-amc-goal" type="number" min="10" max="480" value="60" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
+        <textarea id="gdi-amc-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;"></textarea>
+      </div>
+    </div>`;
+    // cria overlay custom (gdiModal só suporta 1 input, então fazemos manual)
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">+ Adicionar curso manual</b>
+        <button id="gdi-amc-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
+      </div>
+      <div style="padding:20px;">${html}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
+        <button id="gdi-amc-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
+        <button id="gdi-amc-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">Salvar curso</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    let selectedIcon=icons[0];
+    let selectedColor=colors[0];
+    overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(b=>{
+      b.onclick=()=>{
+        overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
+        b.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+        selectedIcon=b.dataset.icon;
+      };
     });
+    overlay.querySelectorAll('.gdi-amc-color-btn').forEach(b=>{
+      b.onclick=()=>{
+        overlay.querySelectorAll('.gdi-amc-color-btn').forEach(x=>x.style.borderWidth='2px');
+        b.style.borderWidth='4px';
+        selectedColor=b.dataset.color;
+      };
+    });
+    // default selection
+    const firstIcon=overlay.querySelector('.gdi-amc-icon-btn');
+    if(firstIcon)firstIcon.style.borderColor='var(--ferreto-primary,#ff8b9f)';
+    const firstColor=overlay.querySelector('.gdi-amc-color-btn');
+    if(firstColor)firstColor.style.borderWidth='4px';
+    const close=()=>overlay.remove();
+    overlay.querySelector('#gdi-amc-x').onclick=close;
+    overlay.querySelector('#gdi-amc-cancel').onclick=close;
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    overlay.querySelector('#gdi-amc-save').onclick=async ()=>{
+      const name=overlay.querySelector('#gdi-amc-name').value.trim();
+      if(!name){showToast('Digite o nome do curso');return;}
+      const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
+      const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
+      // salvar curso manual
+      const LS_MANUAL='gdi-manual-courses-v1';
+      const manual=lsGet(LS_MANUAL,[]);
+      manual.push({
+        id:'mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
+        name,icon:selectedIcon,color:selectedColor,
+        goal,notes,createdAt:Date.now(),
+        manual:true
+      });
+      lsSet(LS_MANUAL,manual);
+      close();
+      showToast('Curso "'+name+'" adicionado!');
+      renderCursos(box);
+    };
+    setTimeout(()=>overlay.querySelector('#gdi-amc-name').focus(),50);
   }
 
   // ★ Modal de cursos ocultos
@@ -4791,8 +5679,14 @@ window.GDI_MODULES.push({name:'debug',init:function(){
         showHiddenCoursesModal(box);
       };
     });
-    box.querySelector('#gdi-restore-all').onclick=()=>{
-      if(confirm('Restaurar todos os '+hidden.length+' cursos?')){
+    box.querySelector('#gdi-restore-all').onclick=async ()=>{
+      const ok=await window.gdiModal({
+        title:'Restaurar todos',
+        message:'Restaurar todos os '+hidden.length+' cursos?',
+        confirmText:'Restaurar todos',
+        cancelText:'Cancelar'
+      });
+      if(ok){
         lsSet(LS_HIDDEN,[]);
         showToast('Todos os cursos restaurados');
         renderCursos(box);
@@ -4894,8 +5788,15 @@ window.GDI_MODULES.push({name:'debug',init:function(){
     // back
     box.querySelector('#gdi-detail-back').onclick=()=>renderCursos(box);
     // hide
-    box.querySelector('#gdi-detail-hide').onclick=()=>{
-      if(confirm('Ocultar "'+name+'" da sua lista de cursos?')){
+    box.querySelector('#gdi-detail-hide').onclick=async ()=>{
+      const ok=await window.gdiModal({
+        title:'Ocultar curso',
+        message:'Ocultar "'+name+'" da sua lista de cursos?',
+        confirmText:'Ocultar',
+        cancelText:'Cancelar',
+        danger:true
+      });
+      if(ok){
         hideCourse(c.key);
         showToast('Curso ocultado');
         renderCursos(box);
@@ -5119,13 +6020,16 @@ window.GDI_MODULES.push({name:'debug',init:function(){
       const all=cards();
       const ix=all.findIndex(x=>x.id===c.id);
       if(ix>=0){
-        const day=86400000,steps=[1,7,30,90];
-        if(g===1){all[ix].box=0;all[ix].due=Date.now()+day;}
-        else if(g===2){all[ix].due=Date.now()+3*day;}
-        else{all[ix].box=Math.min((all[ix].box||0)+1,3);all[ix].due=Date.now()+steps[all[ix].box]*day;}
+        // ★ SRS unificado via gdiGradeCard (SM-2 simplificado)
+        // M22 usava [1,7,30,90] com 4 caixas cap 3; agora usa [1,3,7,21,60] com 5 caixas cap 4
+        // (mesmo algoritmo do M9-ISA)
+        const result=window.gdiGradeCard(all[ix],g);
+        all[ix].box=result.box;
+        all[ix].due=result.due;
+        all[ix].lastReview=result.lastReview;
         saveCards(all);
       }
-      if(g===3)ok++;
+      if(g===3||g===4)ok++;  // Good ou Easy contam como "lembrou"
       i++;draw();
     }
     draw();
@@ -5246,7 +6150,7 @@ window.GDI_MODULES.push({name:'debug',init:function(){
   }
 
   function renderMd(txt){
-    if(window.marked){try{return marked.parse(txt);}catch(_){}}
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return esc(txt).replace(/\n/g,'<br>');
   }
 
@@ -5944,7 +6848,7 @@ window.GDI_MODULES.push({name:'debug',init:function(){
   function save(){try{sessionStorage.setItem(STORE,JSON.stringify(messages.slice(-20)));}catch(_){}}
 
   function renderMd(txt){
-    if(window.marked){try{return marked.parse(txt);}catch(_){}}
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
   }
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
