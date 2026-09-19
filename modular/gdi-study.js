@@ -922,7 +922,27 @@
     for(const k in w)add(k,w[k]&&w[k].at,true);
     for(const k in r)add(k,r[k]&&r[k].at,false);
     (Array.isArray(d.history)?d.history:[]).forEach(h=>{if(h&&h.path)add(h.path,h.at,false)});
-    return [...map.values()].filter(c=>c.lessons.size).sort((a,b)=>b.lastAt-a.lastAt);
+
+    // ★ FIX: inclui cursos manuais adicionados via "Adicionar curso" (modal de navegação do Drive)
+    // Estes ficam em gdi-manual-courses-v1 no localStorage e NÃO vinham do /userstate
+    const LS_MANUAL='gdi-manual-courses-v1';
+    const manual=lsGet(LS_MANUAL,[]);
+    for(const m of manual){
+      if(!m||!m.path)continue;
+      const ck=m.path;  // usa o path do drive como courseKey
+      if(isHidden(ck))continue;
+      let c=map.get(ck);
+      if(!c){
+        c={key:ck,lastAt:m.createdAt||Date.now(),lessons:new Set(),watched:0,manual:true,manualCourse:m};
+        map.set(ck,c);
+      }
+      // marca como curso manual para o card mostrar differently
+      c.manual=true;
+      c.manualCourse=m;
+      if(!c.lastAt)c.lastAt=m.createdAt||Date.now();
+    }
+
+    return [...map.values()].filter(c=>c.lessons.size||c.manual).sort((a,b)=>b.lastAt-a.lastAt);
   }
   // ★ helpers para ocultar/restaurar cursos
   function hideCourse(ck){
@@ -1723,41 +1743,67 @@
       }
     }
     function renderCourseCard(grid,c,box){
-      const name=cleanCourseName(c.key);
+      // ★ FIX: cursos manuais usam dados do manualCourse (nome, ícone, cor)
+      const mc=c.manualCourse||{};
+      const name=mc.name||cleanCourseName(c.key);
       const drive=driveNameOf(c.key);
+      const icon=mc.icon||'📁';
+      const color=mc.color||'var(--ferreto-primary,#ff8b9f)';
+      const isManual=c.manual===true;
       const progress=c.lessons.size>0?Math.round(c.watched/c.lessons.size*100):0;
       const progressColor=progress>=80?'#3fb950':progress>=40?'#ffd43b':'var(--ferreto-primary,#ff8b9f)';
       const remaining=c.lessons.size-c.watched;
       const el=document.createElement('div');el.className='gdi-course';
       el.style.cursor='pointer';
+      // ★ destaque visual para curso manual: border-left com a cor do manualCourse
+      if(isManual)el.style.borderLeft='4px solid '+color;
       el.innerHTML=`
         <div class="gdi-course-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <b title="${escHtml(courseName(c.key))}" style="flex:1;min-width:0;">${escHtml(name)}</b>
-          <button class="gdi-course-remove" title="Ocultar curso" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:14px;padding:2px 6px;flex:none;border-radius:6px;transition:all .15s;"><i class="bi bi-x-lg"></i></button>
+          <b title="${escHtml(mc.name||courseName(c.key))}" style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;">
+            ${isManual?`<span style="font-size:18px;flex:none;">${icon}</span>`:''}
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(name)}</span>
+          </b>
+          <button class="gdi-course-remove" title="${isManual?'Remover curso manual':'Ocultar curso'}" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:14px;padding:2px 6px;flex:none;border-radius:6px;transition:all .15s;"><i class="bi bi-x-lg"></i></button>
         </div>
-        ${drive?`<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:2px;"><i class="bi bi-hdd"></i> ${escHtml(drive)}${c.lastAt?` · última: ${dateBr(c.lastAt)}`:''}</small>`:'<small>&nbsp;</small>'}
+        ${isManual
+          ? `<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:4px;"><i class="bi bi-hdd"></i> ${escHtml(drive||'Drive')} · <span style="color:#ffd43b;"><i class="bi bi-hourglass-split"></i> Meggy processando…</span></small>`
+          : (drive?`<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:2px;"><i class="bi bi-hdd"></i> ${escHtml(drive)}${c.lastAt?` · última: ${dateBr(c.lastAt)}`:''}</small>`:'<small>&nbsp;</small>')
+        }
         <div class="gdi-course-stats">
-          <div class="gdi-course-stat"><span class="gdi-course-stat-num">${c.lessons.size}</span><span class="gdi-course-stat-label">Aulas</span></div>
-          <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#3fb950;">${c.watched}</span><span class="gdi-course-stat-label">Feitas</span></div>
-          <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">${remaining}</span><span class="gdi-course-stat-label">Restam</span></div>
-          <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:${progressColor};">${progress}%</span><span class="gdi-course-stat-label">Concl.</span></div>
+          ${isManual
+            ? `<div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">…</span><span class="gdi-course-stat-label">Batalhão</span></div>
+               <div class="gdi-course-stat"><span class="gdi-course-stat-num">0</span><span class="gdi-course-stat-label">Assistidas</span></div>`
+            : `<div class="gdi-course-stat"><span class="gdi-course-stat-num">${c.lessons.size}</span><span class="gdi-course-stat-label">Aulas</span></div>
+               <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#3fb950;">${c.watched}</span><span class="gdi-course-stat-label">Feitas</span></div>
+               <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">${remaining}</span><span class="gdi-course-stat-label">Restam</span></div>
+               <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:${progressColor};">${progress}%</span><span class="gdi-course-stat-label">Concl.</span></div>`
+          }
         </div>
-        <div class="gdi-progress-bar"><div class="gdi-progress-fill" style="width:${progress}%;background:${progressColor};"></div></div>
-        <button class="gdi-btn-continue gdi-course-continue" disabled><i class="bi bi-hourglass-split"></i> Verificando…</button>`;
+        ${isManual?'':`<div class="gdi-progress-bar"><div class="gdi-progress-fill" style="width:${progress}%;background:${progressColor};"></div></div>`}
+        <button class="gdi-btn-continue gdi-course-continue" ${isManual?'':'disabled'}>
+          ${isManual?'<i class="bi bi-hourglass-split"></i> Meggy preparando materiais…':'<i class="bi bi-hourglass-split"></i> Verificando…'}
+        </button>`;
       grid.appendChild(el);
 
       const contBtn=el.querySelector('.gdi-course-continue');
-      bestIn(c.key).then(target=>{
-        if(target){
-          contBtn.disabled=false;
-          contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
-          contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
-        }else{
-          contBtn.disabled=true;
-          contBtn.className='gdi-btn-continue gdi-btn-done';
-          contBtn.innerHTML='<i class="bi bi-check2-all"></i> Tudo em dia!';
-        }
-      });
+      if(isManual){
+        // curso manual: clicar leva ao path no drive
+        contBtn.disabled=false;
+        contBtn.innerHTML=`<i class="bi bi-folder2-open"></i> Abrir pasta no Drive`;
+        contBtn.onclick=(e)=>{e.stopPropagation();location.href=c.key;};
+      }else{
+        bestIn(c.key).then(target=>{
+          if(target){
+            contBtn.disabled=false;
+            contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
+            contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
+          }else{
+            contBtn.disabled=true;
+            contBtn.className='gdi-btn-continue gdi-btn-done';
+            contBtn.innerHTML='<i class="bi bi-check2-all"></i> Tudo em dia!';
+          }
+        });
+      }
 
       // botão remover
       const removeBtn=el.querySelector('.gdi-course-remove');
