@@ -2988,20 +2988,18 @@
   });
   log('central de estudos ativa (v2.6 — aba na navbar, sem observer loop)');
 
-  // ═══════════════════════════════════════════════════════════════
-  // PLANO A: Bootstrap — Após login, redireciona para ?central=1
-  // Detecta o query param e auto-abre a Central de Estudos + Add Course
-  // ═══════════════════════════════════════════════════════════════
+  // PLANO A v2: Bootstrap robusto — Após login, redireciona para ?central=1
+  console.log('[GDI M22] ★ bootstrap Plano A v2 carregado');
+  window.gdiBootstrapCentral=()=>{console.log('[GDI M22] bootstrap manual');bootstrapCentralOnLogin();};
+
   function bootstrapCentralOnLogin(){
-    // verifica se há ?central=1 na URL (após login/signup)
+    console.log('[GDI M22] bootstrapCentralOnLogin rodando | URL:',window.location.search);
     const params=new URLSearchParams(window.location.search);
     const shouldOpenCentral=params.get('central')==='1';
     if(!shouldOpenCentral){
-      // também verifica se usuário está logado mas não tem cursos → sugere adicionar
       try{
         const manual=lsGet('gdi-manual-courses-v1',[]);
         const watched=Object.keys((window.GDIUser&&window.GDIUser.dump&&window.GDIUser.dump().watched)||{});
-        // se logado (GDIUser.loaded) e não tem cursos nem assistidas, abre central
         if(window.GDIUser && window.GDIUser.loaded && window.GDIUser.loaded()
            && manual.length===0 && watched.length===0){
           console.log('[GDI M22] usuário logado sem cursos — abrindo Central');
@@ -3010,71 +3008,86 @@
       }catch(_){}
       return;
     }
-    console.log('[GDI M22] ?central=1 detectado — abrindo Central automaticamente');
-    // limpa a URL (remove ?central=1) para não re-disparar em refreshes
-    try{
-      const newUrl=window.location.pathname+window.location.hash;
-      window.history.replaceState({},document.title,newUrl);
-    }catch(_){}
-    // espera um pouco para o app.min.js terminar de bootar
-    setTimeout(()=>tryOpenCentralAndPrompt(),1500);
+    console.log('[GDI M22] ★ ?central=1 detectado — abrindo Central');
+    // NÃO limpa URL ainda — só depois que Central abrir de fato
+    tryOpenCentralAndPrompt();
+    [1000,2000,3000,5000,8000].forEach(delay=>{
+      setTimeout(()=>{
+        const visible=panel&&panel.style.display==='flex'&&panel.parentNode;
+        if(!visible){
+          console.log('[GDI M22] retry após',delay,'ms — tentando abrir');
+          tryOpenCentralAndPrompt();
+        }else{
+          try{
+            if(window.location.search.includes('central=1')){
+              const newUrl=window.location.pathname+window.location.hash;
+              window.history.replaceState({},document.title,newUrl);
+              console.log('[GDI M22] URL limpa');
+            }
+          }catch(_){}
+        }
+      },delay);
+    });
   }
 
   function tryOpenCentralAndPrompt(retries){
     retries=retries||0;
-    if(retries>20){
-      console.warn('[GDI M22] não conseguiu abrir Central após 20 tentativas');
-      return;
-    }
-    // tenta abrir a Central via openPanel() (função local do M22)
+    if(retries>30){console.warn('[GDI M22] desistindo após 30 tentativas');return;}
+    console.log('[GDI M22] tryOpenCentralAndPrompt tentativa',retries+1);
+    // Método 1: openPanel() (função local)
     try{
       openPanel('cursos');
-      console.log('[GDI M22] Central aberta automaticamente');
+      console.log('[GDI M22] ★ openPanel() chamado | panel:',panel?'OK':'null','| display:',panel?panel.style.display:'N/A');
     }catch(e){
-      console.warn('[GDI M22] erro ao abrir Central, tentando novamente...',e.message);
+      console.warn('[GDI M22] erro em openPanel:',e.message,'— retry em 500ms');
       setTimeout(()=>tryOpenCentralAndPrompt(retries+1),500);
       return;
     }
-    // depois que a Central abriu, verifica se tem cursos
+    // Verifica visibilidade após 200ms
+    setTimeout(()=>{
+      const isVisible=panel&&panel.style.display==='flex'&&panel.parentNode&&panel.offsetHeight>0;
+      console.log('[GDI M22] panel visível?',isVisible,'| offsetHeight:',panel?panel.offsetHeight:0);
+      if(!isVisible){
+        console.warn('[GDI M22] panel não visível — tentando via navbar button');
+        const navBtn=document.querySelector('.gdi-central-nav-btn,#gdi-central-nav-btn,[data-central-btn],a[href*="central"],button[onclick*="openPanel"]');
+        if(navBtn){
+          console.log('[GDI M22] clicando navbar btn:',navBtn.tagName,navBtn.className||navBtn.id);
+          navBtn.click();
+        }else{
+          console.log('[GDI M22] navbar btn não encontrado — retry em 500ms');
+          setTimeout(()=>tryOpenCentralAndPrompt(retries+1),500);
+        }
+      }
+    },200);
+    // depois que a Central abriu, verifica cursos
     setTimeout(()=>{
       try{
         const manual=lsGet('gdi-manual-courses-v1',[]);
         const allCourses=collectCourses();
         if(manual.length===0 && allCourses.length===0){
-          // primeiro login — auto-abre modal "Adicionar curso"
-          console.log('[GDI M22] primeiro login detectado — auto-abrindo Add Course modal');
-          showToast('🐩 Bem-vindo! Adicione seus cursos para começar os estudos.');
+          console.log('[GDI M22] primeiro login — auto-abrindo Add Course modal');
+          if(window.showToast)showToast('🐩 Bem-vindo! Adicione seus cursos para começar.');
           setTimeout(()=>{
             const body=panel&&panel.querySelector('#gdi-central-body');
             if(body){showAddCourseModal(body);}
-            else{console.warn('[GDI M22] body não encontrado para abrir modal');}
           },800);
         }else{
-          // usuário já tem cursos — tenta retomar batalhão para cursos com materiais pendentes
-          showToast('🐩 Bem-vindo de volta! Retomando processamento dos materiais...');
+          if(window.showToast)showToast('🐩 Bem-vindo de volta! Retomando...');
           tryResumeBattalion();
         }
-      }catch(e){
-        console.warn('[GDI M22] erro em tryOpenCentralAndPrompt:',e.message);
-      }
+      }catch(e){console.warn('[GDI M22] erro:',e.message);}
     },1000);
   }
 
-  // Retoma batalhão para cursos com materiaisReady: false (em background)
   async function tryResumeBattalion(){
     try{
-      // busca lista de cursos do servidor
       const r=await fetch('/api/courses/list',{cache:'no-store'});
       if(!r.ok){console.warn('[GDI M22] /api/courses/list HTTP',r.status);return;}
       const d=await r.json();
       if(!d||!d.ok||!Array.isArray(d.courses))return;
-      // para cada curso com materialsReady: false, dispara batalhão (não-bloqueante)
       const pending=d.courses.filter(c=>c.materialsReady===false||!c.materialsReady);
-      if(pending.length===0){
-        console.log('[GDI M22] todos os cursos já têm materiais prontos');
-        return;
-      }
-      console.log('[GDI M22] retomando batalhão para',pending.length,'curso(s) pendente(s)');
+      if(pending.length===0){console.log('[GDI M22] todos cursos prontos');return;}
+      console.log('[GDI M22] retomando',pending.length,'curso(s)');
       for(const c of pending){
         try{
           if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
@@ -3083,30 +3096,47 @@
           }
         }catch(e){console.warn('[Battalion resume] erro:',e.message);}
       }
-      showToast('⚡ Batalhão retomado para '+pending.length+' curso(s) pendente(s)');
-    }catch(e){
-      console.warn('[GDI M22] erro em tryResumeBattalion:',e.message);
-    }
+      if(window.showToast)showToast('⚡ Batalhão retomado para '+pending.length+' curso(s)');
+    }catch(e){console.warn('[GDI M22] erro:',e.message);}
   }
 
-  // dispara bootstrap quando GDIUser estiver pronto (ou após timeout)
-  if(window.GDIUser && window.GDIUser.ready){
-    window.GDIUser.ready().then(bootstrapCentralOnLogin).catch(()=>bootstrapCentralOnLogin());
+  // MÚLTIPLOS GATILHOS (defensivo)
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',()=>setTimeout(bootstrapCentralOnLogin,800));
   }else{
-    // fallback: tenta após 2s
-    setTimeout(bootstrapCentralOnLogin,2000);
+    setTimeout(bootstrapCentralOnLogin,800);
   }
-  // também escuta evento 'user:ready' do Bus
+  if(window.GDIUser && typeof window.GDIUser.ready==='function'){
+    window.GDIUser.ready().then(bootstrapCentralOnLogin).catch(()=>setTimeout(bootstrapCentralOnLogin,1500));
+  }else{
+    setTimeout(bootstrapCentralOnLogin,1500);
+  }
   if(window.Bus && window.Bus.onGlobal){
     window.Bus.onGlobal('user:ready',()=>setTimeout(bootstrapCentralOnLogin,300));
+    window.Bus.onGlobal('page:change',()=>{
+      if(window.location.search.includes('central=1')){
+        console.log('[GDI M22] page:change + ?central=1 → re-tentando');
+        setTimeout(bootstrapCentralOnLogin,500);
+      }
+    });
   }
+  const setupBootstrapObserver=()=>{
+    const navEl=document.querySelector('.gdi-nav')||document.getElementById('nav');
+    if(!navEl){setTimeout(setupBootstrapObserver,500);return;}
+    new MutationObserver(()=>{
+      if(window.location.search.includes('central=1')){
+        const visible=panel&&panel.style.display==='flex';
+        if(!visible){
+          console.log('[GDI M22] navbar mudou + ?central=1 → re-tentando');
+          bootstrapCentralOnLogin();
+        }
+      }
+    }).observe(navEl,{childList:true,subtree:true});
+  };
+  setupBootstrapObserver();
 
-  // marca sessão ativa no localStorage para outros módulos saberem
   try{localStorage.setItem('gdi-session-active','1');}catch(_){}
-  // quando fecha a aba, marca sessão inativa (worker não consegue manter battalion vivo depois)
-  window.addEventListener('beforeunload',()=>{
-    try{localStorage.setItem('gdi-session-active','0');}catch(_){}
-  });
+  window.addEventListener('beforeunload',()=>{try{localStorage.setItem('gdi-session-active','0');}catch(_){}});
 
 })();
 
