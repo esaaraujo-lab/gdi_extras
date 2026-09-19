@@ -118,6 +118,36 @@ video:fullscreen, video:-webkit-full-screen,
   border:0!important; border-radius:0!important;
 }
 
+
+/* ★ FIX: fullscreen no modo Atenção Dividida (body.gdi-fv) */
+body.gdi-fv:fullscreen video,
+body.gdi-fv :fullscreen video,
+body.gdi-fv video:fullscreen,
+body.gdi-fv .plyr:fullscreen video,
+body.gdi-fv .plyr:-webkit-full-screen video {
+  width:100vw!important; height:100vh!important;
+  max-width:100vw!important; max-height:100vh!important;
+  object-fit:contain!important;
+  margin:0!important; padding:0!important;
+  border:0!important; border-radius:0!important;
+  position:relative!important; top:0!important; left:0!important;
+  transform:none!important;
+}
+body.gdi-fv .plyr:fullscreen,
+body.gdi-fv .plyr:-webkit-full-screen {
+  width:100vw!important; height:100vh!important;
+  max-width:none!important; max-height:none!important;
+  display:flex!important; align-items:center!important; justify-content:center!important;
+  background:#000!important;
+  border:0!important; border-radius:0!important;
+}
+
+
+/* ★ Meggy avatar SVG */
+.gdi-ai-fab-ico svg, .gdi-ai-avatar svg { width:100%; height:100%; display:block; }
+.gdi-ai-avatar { width:40px; height:40px; flex:none; border-radius:50%; overflow:hidden; }
+.gdi-ai-fab-ico { width:32px; height:32px; display:flex; align-items:center; justify-content:center; }
+
 /* Plyr controls em fullscreen — slider ocupa toda largura */
 :fullscreen .plyr--full-ui input[type=range],
 .gdi-player-wrap:fullscreen .plyr--full-ui input[type=range] { width:100%!important; }

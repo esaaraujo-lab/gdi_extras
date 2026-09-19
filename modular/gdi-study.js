@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
-// gdi-study.js — Central de Estudos + Estudo Ativo + Visual
+// gdi-study.js — Área do Aluno + Estudo Ativo + Visual
 // 
 // Módulos:
-//   • M22: Central de Estudos (painel full-screen com 12 abas:
+//   • M22: Área do Aluno (painel full-screen com 12 abas:
 //     Cursos, Questões, Simulado, Cronograma, Revisões, Resumos,
 //     Provas, Redação, Radar, Estatísticas, Flashcards, Maratona)
 //   • M23: Estudo Ativo (banco de questões, simulado, cronograma SRS)
@@ -17,7 +17,7 @@
 
 // M23: ESTUDO ATIVO — questões, simulados, cronograma, revisões
 // Fornece renderQuestoes/renderSimulado/renderCronograma/renderRevisoes
-// consumidos pelo M22 (Central de Estudos). Dados em localStorage.
+// consumidos pelo M22 (Área do Aluno). Dados em localStorage.
 // Integra com: GDIUser (SRS), /api/ai (ISA gera questões), playlist.
 // ═══════════════════════════════════════════════════════════════
 (function(){
@@ -667,7 +667,7 @@
   const stripExt=s=>String(s||'').replace(/\.[a-z0-9]{1,5}$/i,'').trim();
   const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(_){return d}};
   const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}};
-  // ★ FIX: esc local para o M22 (Central de Estudos) — usa escHtml global do app.min.js quando disponível
+  // ★ FIX: esc local para o M22 (Área do Aluno) — usa escHtml global do app.min.js quando disponível
   const esc=s=>{try{return window.escHtml?window.escHtml(s):String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');}catch(_){return String(s||'');}};
   const fmtMin=m=>{m=Math.round(m);return m>=60?Math.floor(m/60)+'h'+String(m%60).padStart(2,'0'):m+'min'};
   const dayKey=t=>{const d=new Date(t||Date.now());return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
@@ -903,6 +903,26 @@
       if(!c.lastAt)c.lastAt=m.createdAt||Date.now();
     }
 
+    // ★ FIX CRÍTICO: consulta /api/courses/list para recuperar cursos salvos no Drive
+    // (assíncrono — não bloqueia o render, mas atualiza quando chegar)
+    fetch('/api/courses/list',{cache:'no-store'}).then(r=>r.ok?r.json():{ok:false,courses:[]}).then(d=>{
+      if(!d||!d.ok||!Array.isArray(d.courses))return;
+      const existingPaths=new Set([...map.values()].map(c=>c.key));
+      let added=0;
+      d.courses.forEach(c=>{
+        if(!c.coursePath||existingPaths.has(c.coursePath))return;
+        // curso existe no Drive mas não no userstate/localStorage — adiciona
+        const mc=c;
+        map.set(c.coursePath,{key:c.coursePath,lastAt:c.addedAt||Date.now(),lessons:new Set(),watched:0,manual:true,manualCourse:{name:c.courseName||'Curso',icon:'📁',color:'#5ddeda',path:c.coursePath,courseKey:c.coursePath}});
+        added++;
+      });
+      if(added>0){
+        console.log('[Cursos] recuperando',added,'curso(s) do Drive');
+        // re-renderiza se o painel estiver aberto
+        const body=panel&&panel.querySelector('#gdi-central-body');
+        if(body&&window.__gdiCurrentTab==='cursos'&&window.renderCursos){window.renderCursos(body);}
+      }
+    }).catch(()=>{});
     return [...map.values()].filter(c=>c.lessons.size||c.manual).sort((a,b)=>b.lastAt-a.lastAt);
   }
   // ★ helpers para ocultar/restaurar cursos
@@ -1110,10 +1130,10 @@
       <div class="gdi-central-head">
         <div class="gdi-central-head-title">
           <span class="gdi-central-icon">📚</span>
-          <b>Central de Estudos</b>
+          <b>Área do Aluno</b>
         
     </div>
-        <div class="gdi-central-stats">
+        <div class="gdi-central-stats"><span id="gdi-battalion-badge" style="display:none;background:linear-gradient(135deg,#ff8b9f,#c026d3);color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;gap:4px;align-items:center;"><i class="bi bi-cpu"></i> <span id="gdi-battalion-text">Batalhão ativo</span></span>
           <span class="gdi-central-stat" title="Sequência de dias estudando">
             <i class="bi bi-fire gdi-stat-fire"></i>
             <b>${streak}</b><span style="color:var(--ferreto-text-muted,#8b949e);">dias</span>
@@ -2904,7 +2924,7 @@
 }
 `;document.head.appendChild(s);
   }
-  // ★ Central de Estudos agora é uma ABA na navbar (não mais flutuante).
+  // ★ Área do Aluno agora é uma ABA na navbar (não mais flutuante).
   // Injeta um .gdi-nav-btn em .gdi-nav-actions a cada render da navbar.
   function injectNavButton(){
     // 1) remove qualquer fab antigo (versão em cache pode ter criado)
@@ -2918,7 +2938,7 @@
     const btn=document.createElement('button');
     btn.id='gdi-central-nav';
     btn.className='gdi-nav-btn';
-    btn.title='Central de Estudos (tecla C)';
+    btn.title='Área do Aluno (tecla C)';
     btn.innerHTML='<i class="bi bi-journal-bookmark-fill"></i><span class="d-none d-md-inline">Estudos</span>';
     btn.onclick=()=>openPanel('cursos');
     // insere antes do botão de tema (se existir) ou no início
@@ -2961,7 +2981,23 @@
   });
 
 
-  log('central de estudos ativa (v2.6 — aba na navbar, sem observer loop)');
+
+  // ★ Indicador visual do batalhão
+  window.gdiUpdateBattalionStatus=function(status){
+    const badge=panel&&panel.querySelector('#gdi-battalion-badge');
+    const txt=panel&&panel.querySelector('#gdi-battalion-text');
+    if(!badge)return;
+    if(status==='active'){badge.style.display='inline-flex';badge.style.animation='gdi-pulse 1.5s infinite';if(txt)txt.textContent='Batalhão escaneando...';}
+    else if(status==='generating'){badge.style.display='inline-flex';if(txt)txt.textContent='Meggy gerando materiais...';}
+    else{badge.style.display='none';}
+  };
+  if(!document.getElementById('gdi-battalion-style')){
+    const s=document.createElement('style');s.id='gdi-battalion-style';
+    s.textContent='@keyframes gdi-pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.7;transform:scale(1.05);}}';
+    document.head.appendChild(s);
+  }
+
+  log('área do aluno ativa (v2.6 — aba na navbar, sem observer loop)');
 
   // PLANO A v2: Bootstrap robusto — Após login, redireciona para ?central=1
 // (bootstrap removido — Central abre via botão da navbar como antes)
@@ -3368,7 +3404,7 @@
 // linguagem visual Ferreto (coral #ff8b9f / teal #5ddeda) sobre os
 // componentes próprios deste extras (debug, pomodoro, notas,
 // materiais, playlist, sleep, skip-intro, continue-card, progress,
-// central de estudos). Não altera lógica dos módulos.
+// área do aluno). Não altera lógica dos módulos.
 // ═══════════════════════════════════════════════════════════════
 (function(){
   if(window.__gdiFerretoExtras)return;window.__gdiFerretoExtras=true;
@@ -3492,7 +3528,7 @@
 /* Nota: marks sobre o player */
 #gdi-note-marks .gdi-note-mark{border-color:var(--ferreto-bg-2)!important;}
 
-/* Central de estudos (M22) — painel flutuante */
+/* Área do Alunos (M22) — painel flutuante */
 .gdi-fc-panel,.gdi-fc-root,[class*="gdi-fc"]{background:var(--ferreto-surface)!important;border-color:var(--ferreto-border-strong)!important;border-radius:var(--ferreto-radius)!important;-webkit-backdrop-filter:blur(18px)!important;backdrop-filter:blur(18px)!important;color:var(--ferreto-text)!important;}
 
 /* ★FIX tema: Continue-card (M13) — override dos estilos inline hardcoded
@@ -3506,7 +3542,7 @@
 #gdi-home-card .gdi-mode-btn{background:var(--ferreto-surface-2)!important;border:1px solid var(--ferreto-border)!important;color:var(--ferreto-text-muted)!important;}
 #gdi-home-card .gdi-mode-btn:hover{background:var(--ferreto-surface-3)!important;color:var(--ferreto-primary)!important;}
 
-/* ★FIX tema: Central de Estudos (M22) — override dos estilos inline
+/* ★FIX tema: Área do Aluno (M22) — override dos estilos inline
    hardcoded em renderPanel/renderStats/renderFlash. */
 .gdi-central-box [style*="color:#8b949e"],.gdi-central-box [style*="color: #8b949e"]{color:var(--ferreto-text-muted)!important;}
 .gdi-central-box [style*="color:#f0f6fc"],.gdi-central-box [style*="color: #f0f6fc"]{color:var(--ferreto-text)!important;}
@@ -3623,7 +3659,7 @@
 
     function showOverlay(){
       if(st.overlay)return;
-      const wrap=v.closest('.gdi-player-wrap')||v.parentNode;
+      const wrap=document.fullscreenElement||v.closest('.gdi-player-wrap')||v.parentNode;
       if(!wrap)return;
       st.overlay=document.createElement('div');
       st.overlay.className='gdi-stall-overlay';
