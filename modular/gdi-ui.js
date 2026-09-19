@@ -143,6 +143,34 @@ body.gdi-fv .plyr:-webkit-full-screen {
 }
 
 
+
+/* ★ FIX: tile Continuar otimizado para mobile/Android */
+@media(max-width:768px){
+  #gdi-home-card{
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:8px !important;
+    padding:10px 12px !important;
+  }
+  #gdi-home-card > div:first-child{
+    width:100% !important;
+    flex:0 0 auto !important;
+  }
+  #gdi-home-card .gdi-btn{
+    width:100% !important;
+    justify-content:center !important;
+    padding:10px !important;
+  }
+  #gdi-home-card > div[style*="gap:16px"]{
+    flex-wrap:wrap !important;
+    justify-content:center !important;
+    gap:8px !important;
+  }
+  #gdi-home-card > div[style*="flex-basis:100%"]{
+    width:100% !important;
+  }
+}
+
 /* ★ Meggy avatar SVG */
 .gdi-ai-fab-ico svg, .gdi-ai-avatar svg { width:100%; height:100%; display:block; }
 .gdi-ai-avatar { width:40px; height:40px; flex:none; border-radius:50%; overflow:hidden; }
@@ -826,7 +854,8 @@ body.gdi-fv .plyr:-webkit-full-screen {
     if(document.querySelector('#content .gdi-study'))return;
     const target=await bestTarget();
     if(document.querySelector('#content .gdi-study'))return;
-    const host=document.querySelector('#content .gdi-wrap')||document.getElementById('content');
+    // ★ FIX: prioriza .gdi-study-left (breadcrumb fica acima do card)
+    const host=document.querySelector('#content .gdi-study-left')||document.querySelector('#content .gdi-wrap')||document.getElementById('content');
     if(!host)return;
     const p=window.location.pathname;
     const isHome=p==='/'||/^\/\d+:\/?$/.test(p);

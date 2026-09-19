@@ -459,6 +459,7 @@
   async function callIsa(prompt){
     const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({message:prompt,messages:[]})});
+    if(!r.ok)throw new Error('Meggy HTTP '+r.status+' — verifique se o worker está online');
     const data=await r.json();
     if(!data.ok)throw new Error(data.error||'Meggy indisponível');
     return data.response||'';
