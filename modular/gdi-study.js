@@ -1630,6 +1630,8 @@
 
   // ★ Modal para adicionar curso manualmente
   function showAddCourseModal(box){
+    // ★ FIX local: garante esc() disponível mesmo se o escopo externo não tiver
+    const esc=window.escHtml||(s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;'));
     const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];
     const icons=['⚖️','📐','📚','🎯','🧮','📖','🔬','💼','🌍','🏛️','⚙️','🎵'];
     // ★ NOVO: navegador de Drive interno (usa gdiListAllFiles do host)
@@ -1656,8 +1658,8 @@
           <div id="gdi-amc-bc" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:8px 10px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;margin-bottom:10px;font-size:12px;"></div>
           <!-- Loading -->
           <div id="gdi-amc-loading" style="display:none;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><div class="gdi-spinner" style="margin:0 auto 10px;"></div>Carregando pastas...</div>
-          <!-- Lista de pastas -->
-          <div id="gdi-amc-folders" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:340px;overflow-y:auto;padding:4px;"></div>
+          <!-- Lista de pastas — sem max-height! O body do modal já scrola -->
+          <div id="gdi-amc-folders" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;padding:4px;"></div>
           <!-- Pasta atual info -->
           <div id="gdi-amc-current-info" style="display:none;margin-top:14px;padding:12px;background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.04));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:10px;"></div>
         </div>
@@ -1922,6 +1924,7 @@
           selectedPath=currentPath;
           selectedName=courseName;
           currentInfoEl.style.display='block';
+          // ★ INLINE ONCLICK + função global: máximo de robustez — não depende de closure nem event delegation
           currentInfoEl.innerHTML=`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
             <div style="font-size:30px;flex:none;">📁</div>
             <div style="flex:1;min-width:200px;">
@@ -1929,9 +1932,12 @@
               <div style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${totalPdfs} PDF(s) · ${totalVideos} vídeo(s) nesta pasta</div>
               <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:2px;font-family:'JetBrains Mono',monospace;word-break:break-all;">${esc(currentPath)}</div>
             </div>
-            <button id="gdi-amc-select-current" style="padding:8px 14px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:12px;">✓ Selecionar esta pasta</button>
+            <button id="gdi-amc-select-current" type="button" onclick="window.__gdiAddCourseFromButton(this)" data-path="${esc(currentPath)}" data-name="${esc(courseName)}" data-pdfs="${totalPdfs}" style="padding:10px 18px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:13px;flex:none;pointer-events:auto;">✓ Selecionar esta pasta</button>
           </div>`;
-          currentInfoEl.querySelector('#gdi-amc-select-current').onclick=()=>doAddCourseFromDrive(currentPath, courseName, totalPdfs);
+          // ★ EVENT DELEGATION: handler anexado ao overlay, captura cliques no botão
+          // não importa quantas vezes o botão for recriado por navigate()
+          // (onclick pode ser perdido quando innerHTML é redefinido; addEventListener no parent não)
+          // Não precisamos anexar aqui — o handler está no overlay (definido uma vez abaixo)
           saveBtn.textContent='✓ Adicionar "'+courseName.slice(0,30)+'"';
         }else{
           selectedPath=null;
@@ -1948,58 +1954,62 @@
 
     // ── Adiciona curso a partir de pasta selecionada no Drive ──
     async function doAddCourseFromDrive(coursePath, courseName, pdfCount){
-      const LS_MANUAL='gdi-manual-courses-v1';
-      const manual=lsGet(LS_MANUAL,[]);
-      // evita duplicar
-      if(manual.some(c=>c.path===coursePath)){
-        showToast('Curso "'+courseName+'" já está adicionado');
-        return;
-      }
-      const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
-      manual.push({
-        id:courseId,name:courseName,icon:'📁',color:'#5ddeda',
-        goal:60,notes:'',createdAt:Date.now(),
-        manual:true,path:coursePath,courseKey:coursePath
-      });
-      lsSet(LS_MANUAL,manual);
-      const close=()=>overlay.remove();
-      close();
-      showToast('Curso "'+courseName+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
-      renderCursos(box);
-      // ★ BATALHÃO: dispara processamento em background
+      console.log('[AddCourse] doAddCourseFromDrive iniciado:',coursePath,'|',courseName);
       try{
-        const pdfs=[];
-        if(window.gdiListAllFiles){
-          try{
-            const files=await window.gdiListAllFiles(coursePath,window.gdiGetPw?window.gdiGetPw():'');
-            if(Array.isArray(files)){
-              for(const f of files){
-                if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
-                  pdfs.push({name:f.name, url:f.path||f.url, text:''});
-                }
-              }
-            }
-          }catch(_){}
+        const LS_MANUAL='gdi-manual-courses-v1';
+        const manual=lsGet(LS_MANUAL,[]);
+        // evita duplicar
+        if(manual.some(c=>c.path===coursePath)){
+          console.log('[AddCourse] curso já existe — abortando');
+          showToast('Curso "'+courseName+'" já está adicionado');
+          return;
         }
-        if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
-          // extrai texto de até 5 PDFs em paralelo
-          if(pdfs.length && window.gdiIsaPdf.extractPdfText){
-            const PARALLEL=5;
-            for(let i=0;i<pdfs.length;i+=PARALLEL){
-              const chunk=pdfs.slice(i,i+PARALLEL);
-              await Promise.allSettled(chunk.map(async p=>{
-                try{
-                  if(p.url){
-                    const txt=await window.gdiIsaPdf.extractPdfText(p.url);
-                    p.text=txt.slice(0,15000);
-                  }
-                }catch(_){}
-              }));
-            }
+        const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+        manual.push({
+          id:courseId,name:courseName,icon:'📁',color:'#5ddeda',
+          goal:60,notes:'',createdAt:Date.now(),
+          manual:true,path:coursePath,courseKey:coursePath
+        });
+        lsSet(LS_MANUAL,manual);
+        console.log('[AddCourse] ★ curso SALVO no localStorage. Próximo: toast + re-render + fechar modal');
+
+        // ★ TEORIA #4: feedback visual (toast) ANTES de fechar modal
+        if(window.showToast)showToast('Curso "'+courseName+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
+
+        // ★ TEORIA #3: chama renderCursos ANTES de remover overlay (lista atualizada quando modal fecha)
+        try{
+          renderCursos(box);
+          console.log('[AddCourse] ★ renderCursos() concluído');
+        }catch(e){
+          console.warn('[AddCourse] erro ao re-renderizar:',e.message);
+        }
+
+        // ★ TEORIA #2: só fecha modal DEPOIS de salvar + re-renderizar (evita "fecha sem nada acontecer")
+        if(overlay&&overlay.parentNode){
+          overlay.remove();
+          console.log('[AddCourse] ★ modal fechado');
+        }
+
+        // ★ BATALHÃO: dispara processamento em background (depois que modal já fechou)
+        // Não precisa extrair PDFs no front — o batalhão no worker escaneia tudo via gdiListAllFiles
+        console.log('[AddCourse] disparando batalhão em background...');
+        try{
+          // apenas dispara o batalhão — não espera ( é async em background)
+          if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+            // payload mínimo: o worker vai escanear o coursePath e descobrir PDFs sozinho
+            window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
+              console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
+            });
+            console.log('[AddCourse] ★ batalhão disparado em background');
+          }else{
+            console.warn('[AddCourse] gdiIsaPdf.startBattalion não disponível — batalhão não disparado');
           }
-          await window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, pdfs);
-        }
-      }catch(e){console.warn('[Batalhão] falha:',e.message);}
+        }catch(e){console.warn('[Batalhão] falha:',e.message);}
+      }catch(e){
+        console.error('[AddCourse] erro fatal em doAddCourseFromDrive:',e);
+        if(window.showToast)showToast('Erro ao adicionar curso: '+e.message);
+        throw e;
+      }
     }
 
     // ── Painel Manual (ícones + cores) ──
@@ -2023,52 +2033,102 @@
     if(firstColor)firstColor.style.borderWidth='4px';
 
     // ── Close handlers ──
-    const close=()=>overlay.remove();
+    const close=()=>{if(overlay&&overlay.parentNode)overlay.remove();};
     overlay.querySelector('#gdi-amc-x').onclick=close;
     overlay.querySelector('#gdi-amc-cancel').onclick=close;
     overlay.onclick=(e)=>{if(e.target===overlay)close();};
 
+    // ★ EVENT DELEGATION (CAPTURE): pega cliques no botão "Selecionar esta pasta"
+    // Não importa quantas vezes o botão for recriado por navigate() — esse handler
+    // sempre dispara porque está no overlay (parent estável). Use capture:true para
+    // pegar o evento ANTES de qualquer outro handler (garante execução).
+    // ★ FUNÇÃO GLOBAL também definida para inline onclick (fallback robusto)
+    window.__gdiAddCourseFromButton=async function(btn){
+      if(!btn){console.error('[AddCourse] botão null');return;}
+      const p=btn.dataset.path||'';
+      const n=btn.dataset.name||'Pasta';
+      const pdfs=parseInt(btn.dataset.pdfs||'0',10);
+      console.log('[AddCourse] ✓ Selecionar clicado (inline global) | path:',p,'| name:',n,'| pdfs:',pdfs);
+      // ★ 1) feedback visual imediato: spinner no botão + disable
+      const originalText=btn.textContent;
+      btn.disabled=true;
+      btn.style.opacity='0.6';
+      btn.style.pointerEvents='none';
+      btn.innerHTML='<i class="bi bi-hourglass-split"></i> Adicionando...';
+      try{
+        // ★ 2) chama persistência (async) — espera completar
+        await doAddCourseFromDrive(p, n, pdfs);
+        // ★ 3) modal já foi fechado dentro de doAddCourseFromDrive (após salvar + re-renderizar)
+      }catch(err){
+        console.error('[AddCourse] ERRO ao adicionar curso (inline):',err);
+        if(window.showToast)showToast('Erro: '+err.message);
+        // restaura botão em caso de erro
+        btn.disabled=false;
+        btn.style.opacity='1';
+        btn.style.pointerEvents='auto';
+        btn.textContent=originalText;
+      }
+    };
+
+    overlay.addEventListener('click',async(e)=>{
+      const btn=e.target.closest&&e.target.closest('#gdi-amc-select-current');
+      if(!btn)return;  // não foi clique no botão → ignora
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();  // ★ impede overlay.onclick de também disparar
+      // delega para função global (lida com spinner + async + try/catch)
+      if(window.__gdiAddCourseFromButton)window.__gdiAddCourseFromButton(btn);
+    },true);  // ← capture:true = pega no início do evento
+
     // ── Save handler (decide modo) ──
-    saveBtn.onclick=async ()=>{
-      if(currentMode==='drive'){
-        if(!selectedPath||!selectedName){showToast('Navegue até uma pasta e clique em "Selecionar esta pasta"');return;}
-        await doAddCourseFromDrive(selectedPath, selectedName, 0);
-      }else{
-        // modo manual
-        const name=overlay.querySelector('#gdi-amc-name').value.trim();
-        if(!name){showToast('Digite o nome do curso');return;}
-        const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
-        const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
-        const LS_MANUAL='gdi-manual-courses-v1';
-        const manual=lsGet(LS_MANUAL,[]);
-        const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
-        const coursePath='/0:/'+encodeURIComponent(name);
-        manual.push({
-          id:courseId,name,icon:selectedIcon,color:selectedColor,
-          goal,notes,createdAt:Date.now(),
-          manual:true,path:coursePath,courseKey:coursePath
-        });
-        lsSet(LS_MANUAL,manual);
-        close();
-        showToast('Curso "'+name+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
-        renderCursos(box);
-        // ★ BATALHÃO para manual: tenta adivinhar path do drive
-        try{
-          const pdfs=[];
-          if(window.gdiListAllFiles){
-            try{
-              const files=await window.gdiListAllFiles(coursePath,'');
-              if(Array.isArray(files)){
-                for(const f of files){
-                  if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
-                    pdfs.push({name:f.name, url:f.path||f.url, text:''});
+    saveBtn.onclick=async (e)=>{
+      if(e){e.preventDefault();e.stopPropagation();}
+      console.log('[AddCourse] Save button clicado | modo:',currentMode,'| selectedPath:',selectedPath);
+      try{
+        if(currentMode==='drive'){
+          if(!selectedPath||!selectedName){
+            console.warn('[AddCourse] nenhum path selecionado');
+            showToast('Navegue até uma pasta e clique em "Selecionar esta pasta"');
+            return;
+          }
+          console.log('[AddCourse] chamando doAddCourseFromDrive via save button');
+          await doAddCourseFromDrive(selectedPath, selectedName, 0);
+        }else{
+          // modo manual
+          const name=overlay.querySelector('#gdi-amc-name').value.trim();
+          if(!name){showToast('Digite o nome do curso');return;}
+          const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
+          const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
+          const LS_MANUAL='gdi-manual-courses-v1';
+          const manual=lsGet(LS_MANUAL,[]);
+          const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+          const coursePath='/0:/'+encodeURIComponent(name);
+          manual.push({
+            id:courseId,name,icon:selectedIcon,color:selectedColor,
+            goal,notes,createdAt:Date.now(),
+            manual:true,path:coursePath,courseKey:coursePath
+          });
+          lsSet(LS_MANUAL,manual);
+          if(overlay&&overlay.parentNode)overlay.remove();
+          showToast('Curso "'+name+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
+          try{renderCursos(box);}catch(_){}
+          // ★ BATALHÃO para manual
+          try{
+            const pdfs=[];
+            if(window.gdiListAllFiles){
+              try{
+                const files=await window.gdiListAllFiles(coursePath,'');
+                if(Array.isArray(files)){
+                  for(const f of files){
+                    if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
+                      pdfs.push({name:f.name, url:f.path||f.url, text:''});
+                    }
                   }
                 }
-              }
-            }catch(_){}
-          }
-          if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
-            if(pdfs.length && window.gdiIsaPdf.extractPdfText){
+              }catch(_){}
+            }
+            if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+              if(pdfs.length && window.gdiIsaPdf.extractPdfText){
               const PARALLEL=5;
               for(let i=0;i<pdfs.length;i+=PARALLEL){
                 const chunk=pdfs.slice(i,i+PARALLEL);
@@ -2085,6 +2145,10 @@
             await window.gdiIsaPdf.startBattalion(coursePath, coursePath, name, pdfs);
           }
         }catch(e){console.warn('[Batalhão] falha:',e.message);}
+        }
+      }catch(e){
+        console.error('[AddCourse] erro fatal no save handler:',e);
+        if(window.showToast)showToast('Erro: '+e.message);
       }
     };
 
