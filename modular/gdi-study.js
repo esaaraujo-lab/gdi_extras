@@ -1306,7 +1306,20 @@
       bestIn(ck).then(target=>{
         if(target){
           contBtn.disabled=false;
-          contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
+          // ★ botão "Ir para Drive" (abre pasta do curso no Drive)
+        const driveBtn=el.querySelector('.gdi-course-drive')||document.createElement('button');
+        if(!el.querySelector('.gdi-course-drive')){
+          driveBtn.className='gdi-mode-btn gdi-course-drive';
+          driveBtn.style.cssText='font-size:11px;padding:4px 10px;flex:none;';
+          driveBtn.innerHTML='<i class="bi bi-folder2-open"></i> Drive';
+          driveBtn.title='Abrir no Drive';
+          driveBtn.onclick=(e)=>{e.stopPropagation();if(c.key)window.location.href=c.key;};
+          // inserir antes do botão remover
+          const removeBtn=el.querySelector('.gdi-course-remove');
+          if(removeBtn)removeBtn.parentNode.insertBefore(driveBtn,removeBtn);
+          else el.querySelector('.gdi-course-head').appendChild(driveBtn);
+        }
+        contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
           contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
         }else{
           contBtn.disabled=true;
@@ -1942,7 +1955,20 @@
         bestIn(c.key).then(target=>{
           if(target){
             contBtn.disabled=false;
-            contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
+            // ★ botão "Ir para Drive" (abre pasta do curso no Drive)
+        const driveBtn=el.querySelector('.gdi-course-drive')||document.createElement('button');
+        if(!el.querySelector('.gdi-course-drive')){
+          driveBtn.className='gdi-mode-btn gdi-course-drive';
+          driveBtn.style.cssText='font-size:11px;padding:4px 10px;flex:none;';
+          driveBtn.innerHTML='<i class="bi bi-folder2-open"></i> Drive';
+          driveBtn.title='Abrir no Drive';
+          driveBtn.onclick=(e)=>{e.stopPropagation();if(c.key)window.location.href=c.key;};
+          // inserir antes do botão remover
+          const removeBtn=el.querySelector('.gdi-course-remove');
+          if(removeBtn)removeBtn.parentNode.insertBefore(driveBtn,removeBtn);
+          else el.querySelector('.gdi-course-head').appendChild(driveBtn);
+        }
+        contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
             contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
           }else{
             contBtn.disabled=true;
@@ -2723,6 +2749,19 @@
     bestIn(c.key).then(target=>{
       if(target){
         contBtn.disabled=false;
+        // ★ botão "Ir para Drive" (abre pasta do curso no Drive)
+        const driveBtn=el.querySelector('.gdi-course-drive')||document.createElement('button');
+        if(!el.querySelector('.gdi-course-drive')){
+          driveBtn.className='gdi-mode-btn gdi-course-drive';
+          driveBtn.style.cssText='font-size:11px;padding:4px 10px;flex:none;';
+          driveBtn.innerHTML='<i class="bi bi-folder2-open"></i> Drive';
+          driveBtn.title='Abrir no Drive';
+          driveBtn.onclick=(e)=>{e.stopPropagation();if(c.key)window.location.href=c.key;};
+          // inserir antes do botão remover
+          const removeBtn=el.querySelector('.gdi-course-remove');
+          if(removeBtn)removeBtn.parentNode.insertBefore(driveBtn,removeBtn);
+          else el.querySelector('.gdi-course-head').appendChild(driveBtn);
+        }
         contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,40))}`;
         contBtn.onclick=()=>{location.href=target+(target.includes('?')?'&':'?')+'a=view';};
       }else{
