@@ -25,7 +25,7 @@
      desconectado ao trocar de página, M9 não reconstrói na mesma
      aula, M7 só toca no DOM quando muda, M22 limita cursos.
    ═══════════════════════════════════════════════════════════════ */
-console.log('[GDI Extras Modular] v2.6-fix carregado');
+console.log('[GDI Extras Modular] v2.7 carregado');
 const GDI_ROOT=()=>document.documentElement; // UI flutuante vive aqui (fora do body)
 
 window.GDI_MODULES = window.GDI_MODULES || [];
@@ -252,7 +252,7 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
 .gdi-note-del:hover{color:#ff6b6b;}
 .gdi-notes-empty{color:var(--ferreto-text-muted,#8b949e);font-size:12px;text-align:center;padding:6px;}
 /* ★ Pomodoro agora é botão na navbar — fab flutuante removido */
-#gdi-pom-root{display:none!important;}
+
 #gdi-sleep-btn{opacity:.8;transition:opacity .25s ease;}
 #gdi-sleep-btn:hover{opacity:1;}
 #gdi-note-marks{position:relative;height:16px;margin-top:4px;cursor:pointer;display:none;}

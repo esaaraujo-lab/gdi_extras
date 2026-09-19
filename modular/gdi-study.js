@@ -1,7 +1,4 @@
 // ═══════════════════════════════════════════════════════════════
-// gdi-study.js — v2.7-PLANO-A — bootstrap login + brain + leis desatualizadas
-// ★ VERSION MARKER — verifique no console: window.GDI_STUDY_VERSION
-// ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
 // gdi-study.js — Central de Estudos + Estudo Ativo + Visual
@@ -653,42 +650,9 @@
   // ★ Expõe startSession no window para que o M9-ISA (botão "Resolver
   // agora →" após gerar questões) possa chamar a sessão interativa
   // diretamente sobre o bodyEl da aula, sem precisar abrir a Central.
-  window.__gdiStartSession=startSession;
+  
   // ★ Expõe gradeQ para o quiz do M9-ISA (interativo na aba de questões)
   window.__gdiGradeQ=gradeQ;
-  // ★ Expõe gradeQ para outros módulos (ex.: flashcards das erradas)
-  window.__gdiQStats=function(){
-    // retorna {perSubject:[{subject,total,hits,misses,acc}], worst:[...], overall:{...}}
-    const all=questions();
-    const srs=qSrs();
-    const bySbj={};
-    all.forEach(q=>{
-      const s=(q.subject||'—');
-      if(!bySbj[s])bySbj[s]={subject:s,total:0,hits:0,misses:0};
-      bySbj[s].total++;
-      // se a questão tem SRS, contamos como "respondida"
-      const e=srs[q.id];
-      if(e&&e.last){
-        if(e.box>0)bySbj[s].hits++; // simplificação: box>0 = acertou última
-        else bySbj[s].misses++;
-      }
-    });
-    const perSubject=Object.values(bySbj).map(x=>{
-      const answered=x.hits+x.misses;
-      x.answered=answered;
-      x.acc=answered?Math.round(x.hits/answered*100):null;
-      return x;
-    });
-    perSubject.sort((a,b)=>(a.acc==null?101:a.acc)-(b.acc==null?101:b.acc));
-    const overall={
-      total:all.length,
-      answered:perSubject.reduce((s,x)=>s+x.answered,0),
-      hits:perSubject.reduce((s,x)=>s+x.hits,0),
-      misses:perSubject.reduce((s,x)=>s+x.misses,0)
-    };
-    overall.acc=overall.answered?Math.round(overall.hits/overall.answered*100):null;
-    return {perSubject,overall,worst:perSubject.filter(x=>x.acc!=null&&x.acc<60)};
-  };
 
   console.log('[GDI Extras] M23 Estudo Ativo (questões/simulado/cronograma/revisões) ativo');
 })();
@@ -715,7 +679,7 @@
   // Inline onclick chama window.gdiAddCourseFromButton(this); addEventListener no document
   // também captura cliques (fallback caso CSP bloqueie inline handlers).
   window.gdiAddCourseFromButton=async function(btn){
-    console.log('[AddCourse] ★ gdiAddCourseFromButton CHAMADO | btn:',btn);
+    
     if(!btn){
       console.error('[AddCourse] botão null');
       return;
@@ -723,7 +687,7 @@
     const p=btn.dataset.path||'';
     const n=btn.dataset.name||'Pasta';
     const pdfs=parseInt(btn.dataset.pdfs||'0',10);
-    console.log('[AddCourse] dataset | path:',p,'| name:',n,'| pdfs:',pdfs);
+    
     if(!p){
       console.error('[AddCourse] data-path vazio — abortando');
       if(window.showToast)showToast('Erro: pasta não selecionada');
@@ -758,7 +722,7 @@
   //   5. Dispara batalhão em background (não-bloqueante) → cria materiais em subpastas:
   //      resumos/, cards/, pilulas/, questoes/, simulados/ dentro da pasta do aluno no Drive
   window.gdiAddCourseFromDrive=async function(coursePath, courseName, pdfCount){
-    console.log('[AddCourse] gdiAddCourseFromDrive iniciado:',coursePath,'|',courseName);
+    
     const overlay=document.querySelector('.gdi-modal-overlay');
     const box=document.getElementById('gdi-central-body');
     const LS_MANUAL='gdi-manual-courses-v1';
@@ -795,7 +759,7 @@
         });
         if(r.ok){
           const d=await r.json().catch(()=>({}));
-          console.log('[AddCourse] ★ salvo em general_courses.json no Drive | resposta:',d);
+          
         }else{
           console.warn('[AddCourse] /api/courses/add HTTP',r.status,'— continuando mesmo assim');
         }
@@ -2034,7 +1998,7 @@
         // 1ª tentativa: gdiListAllFiles do host
         if(window.gdiListAllFiles){
           try{
-            console.log('[AddCourse] navegando para:',currentPath);
+            
             const result=await window.gdiListAllFiles(currentPath, pw);
             if(Array.isArray(result))allFiles=result;
           }catch(e){console.warn('[AddCourse] gdiListAllFiles falhou:',e.message);}
@@ -2171,7 +2135,7 @@
 
     // ── Adiciona curso a partir de pasta selecionada no Drive ──
     async function doAddCourseFromDrive(coursePath, courseName, pdfCount){
-      console.log('[AddCourse] doAddCourseFromDrive iniciado:',coursePath,'|',courseName);
+      
       try{
         const LS_MANUAL='gdi-manual-courses-v1';
         const manual=lsGet(LS_MANUAL,[]);
@@ -2197,7 +2161,7 @@
           });
           if(r.ok){
             const d=await r.json().catch(()=>({}));
-            console.log('[AddCourse] ★ salvo em general_courses.json no Drive | resposta:',d);
+            
           }else{
             console.warn('[AddCourse] /api/courses/add HTTP',r.status,'— continuando mesmo assim');
           }
@@ -2276,7 +2240,7 @@
       const p=btn.dataset.path||'';
       const n=btn.dataset.name||'Pasta';
       const pdfs=parseInt(btn.dataset.pdfs||'0',10);
-      console.log('[AddCourse] ✓ Selecionar clicado (inline global) | path:',p,'| name:',n,'| pdfs:',pdfs);
+      
       // ★ 1) feedback visual imediato: spinner no botão + disable
       const originalText=btn.textContent;
       btn.disabled=true;
@@ -2311,7 +2275,7 @@
     // ── Save handler (decide modo) ──
     saveBtn.onclick=async (e)=>{
       if(e){e.preventDefault();e.stopPropagation();}
-      console.log('[AddCourse] Save button clicado | modo:',currentMode,'| selectedPath:',selectedPath);
+      
       try{
         if(currentMode==='drive'){
           if(!selectedPath||!selectedName){
@@ -2824,7 +2788,7 @@
 /* ═══ CENTRAL DE ESTUDOS v3 — design moderno (sidebar + dashboard) ═══ */
 #gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);color:var(--ferreto-text,#f3f5fa);font-family:var(--ferreto-font-body,'Rubik',sans-serif);display:none;overflow-y:auto;}
 @keyframes gdi-central-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
-.gdi-central-box{max-width:1200px;margin:0 auto;min-height:100vh;background:var(--ferreto-surface,rgba(22,27,38,.72));border:1px solid var(--ferreto-border,#21262d);}
+.gdi-central-box{width:100%;height:100%;min-height:100vh;margin:0;padding:0;background:var(--ferreto-bg,#070910);border:0;border-radius:0;}
 /* Header — minimalista, com stats rápidas */
 .gdi-central-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.05));flex-shrink:0;flex-wrap:nowrap;}
 .gdi-central-head-title{display:flex;align-items:center;gap:10px;flex-shrink:0;}
@@ -2840,7 +2804,7 @@
 #gdi-central-x{margin-left:auto;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text-muted,#8b949e);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
 #gdi-central-x:hover{background:rgba(255,107,107,.15);color:#ff8b8b;border-color:rgba(255,107,107,.3);}
 /* Layout principal: sidebar + body */
-.gdi-central-main{display:flex;gap:0;min-height:calc(100vh - 200px);}
+.gdi-central-main{display:flex;flex:1;min-height:0;width:100%;}
 /* Sidebar */
 .gdi-central-sidebar{width:220px;flex-shrink:0;background:var(--ferreto-bg-2,#0d1119);border-right:1px solid var(--ferreto-border,#21262d);overflow-y:auto;padding:14px 10px;display:flex;flex-direction:column;gap:2px;}
 .gdi-central-sidebar::-webkit-scrollbar{width:6px;}

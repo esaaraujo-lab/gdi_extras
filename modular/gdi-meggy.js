@@ -936,14 +936,14 @@
 
     // ★ PARALELISMO TOTAL: resumo + pílulas + questões de cada PDF — TODOS ao mesmo tempo
     // Cada tarefa recebe um keyHint diferente para distribuir entre as APIs NVIDIA
-    let keyHintCounter=0;
+    
     const allTasks=[];
 
     // tarefa 1: resumo
     if(!_chainCache[key].summary){
       allTasks.push({
-        hint:keyHintCounter++,
-        fn:()=>callIsaKeyed('Leia este material de aula e faça um resumo COMPLETO e estruturado em Markdown. Cubra TODOS os tópicos. Organize em seções com ## títulos, use **negrito** para destaques e listas. Não omita nenhum tema:\n\n'+allText.slice(0,20000),keyHintCounter-1)
+        
+        fn:()=>callIsaKeyed('Leia este material de aula e faça um resumo COMPLETO e estruturado em Markdown. Cubra TODOS os tópicos. Organize em seções com ## títulos, use **negrito** para destaques e listas. Não omita nenhum tema:\n\n'+allText.slice(0,20000),0)
           .then(r=>{if(r&&r.trim()){_chainCache[key].summary=r;saveIsaSummary(lesson,r);}})
           .catch(e=>console.warn('[Meggy] resumo falhou',e.message))
       });
@@ -952,8 +952,8 @@
     // tarefa 2: pílulas
     if(!_chainCache[key].mindmap){
       allTasks.push({
-        hint:keyHintCounter++,
-        fn:()=>callIsaKeyed('Crie "Pílulas" deste material — um resumo ultra-conciso em bullets. Apenas pontos-chave para revisão rápida. Máximo 15 bullets. Formato:\n# Pílulas\n- Ponto-chave 1\n- Ponto-chave 2\n...\n\nConteúdo:\n'+allText.slice(0,20000),keyHintCounter-1)
+        
+        fn:()=>callIsaKeyed('Crie "Pílulas" deste material — um resumo ultra-conciso em bullets. Apenas pontos-chave para revisão rápida. Máximo 15 bullets. Formato:\n# Pílulas\n- Ponto-chave 1\n- Ponto-chave 2\n...\n\nConteúdo:\n'+allText.slice(0,20000),0)
           .then(r=>{if(r&&r.trim())_chainCache[key].mindmap=r;})
           .catch(e=>console.warn('[Meggy] pílulas falhou',e.message))
       });
@@ -976,8 +976,8 @@
       // uma tarefa por PDF
       pdfTexts.forEach((pdf)=>{
         allTasks.push({
-          hint:keyHintCounter++,
-          fn:()=>callIsaKeyed('Você é um examinador de concurso público brasileiro experiente. Baseado neste material, gere 10 questões de concurso em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"legalText":"...","explanation":"...","fundamentacao":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"legalText":"...","explanation":"...","fundamentacao":"..."}\n\nCAMPOS:\n- statement: enunciado claro, contexto completo\n- legalText: o dispositivo legal/dispositivo normativo aplicável (ex: "art. 5º, CF"; "Súmula Vinculante 14"; "Lei 8.906/94, art. 7º")\n- explanation: explicação técnica do acerto/erro (regra violada ou aplicada)\n- fundamentacao: fundamentação didática completa, explicando por que a alternativa correta está correta E por que as outras estão erradas\n\nSem comentários, só JSON.\n\n'+pdf.text.slice(0,15000),keyHintCounter-1)
+          
+          fn:()=>callIsaKeyed('Você é um examinador de concurso público brasileiro experiente. Baseado neste material, gere 10 questões de concurso em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"legalText":"...","explanation":"...","fundamentacao":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"legalText":"...","explanation":"...","fundamentacao":"..."}\n\nCAMPOS:\n- statement: enunciado claro, contexto completo\n- legalText: o dispositivo legal/dispositivo normativo aplicável (ex: "art. 5º, CF"; "Súmula Vinculante 14"; "Lei 8.906/94, art. 7º")\n- explanation: explicação técnica do acerto/erro (regra violada ou aplicada)\n- fundamentacao: fundamentação didática completa, explicando por que a alternativa correta está correta E por que as outras estão erradas\n\nSem comentários, só JSON.\n\n'+pdf.text.slice(0,15000),0)
             .then(resp=>{
               if(!resp)return;
               try{
@@ -2466,10 +2466,10 @@
   }
   function serverLabel(){
     if(_serverProvider==='nvidia-nim')return {name:'NVIDIA NIM',label:'NVIDIA NIM <b>(LLaMA · /api/ai)</b>'};
-    if(_serverProvider==='zhipu-ai')return {name:'智谱AI (Zhipu)',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
+    if(_serverProvider==='zhipu-ai')return {name:'Meggy AI (BlackTie)',label:'Meggy AI <b>(BlackTie GLM · /api/ai)</b>'};
     if(_serverProvider==='cf-workers-ai')return {name:'CF Workers AI',label:'Cloudflare <b>(Workers AI · /api/ai)</b>'};
     if(_serverProvider==='openai')return {name:'OpenAI',label:'OpenAI <b>(/api/ai)</b>'};
-    return {name:'智谱AI (Zhipu)',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
+    return {name:'Meggy AI (BlackTie)',label:'Meggy AI <b>(BlackTie GLM · /api/ai)</b>'};
   }
 
   // detecta a IA do navegador ao carregar (1×) + status do servidor
@@ -2480,7 +2480,7 @@
     updateStatus();
     const browserReady=(_browserAIState==='ready');
     const serverOk=!!_serverEnabled;
-    console.log('[Meggy] IA do navegador:',_browserAIState,'| servidor habilitado:',serverOk);
+    
     if(browserReady||serverOk){
       showWidget();
     }else{
