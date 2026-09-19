@@ -1786,58 +1786,33 @@
       });
     }
 
-    // ★ FIX: Normaliza path para sempre ter / no final de drive (ex: /0: → /0:/)
-    // Sem isso, gdiListAllFiles faz fetch('/0:') que retorna 404/vazio
-    function normalizeNavPath(p){
-      if(!p||p==='/')return '/';
-      // /0: → /0:/
-      if(/^\/\d+:$/.test(p))return p+'/';
-      // /0:/path → /0:/path/  (garante trailing slash)
-      // Não forçamos trailing em paths longos — só em drives root
-      return p;
-    }
     async function navigate(path){
-      currentPath=normalizeNavPath(normPath(path));
+      currentPath=normPath(path);
       renderBreadcrumb();
       loadingEl.style.display='block';
       foldersEl.innerHTML='';
       currentInfoEl.style.display='none';
       try{
-        // ★ ESTRATÉGIA: chama gdiListAllFiles (faz POST no path com paginação)
-        // Se falhar ou retornar vazio, faz fetch direto como fallback
+        if(!window.gdiListAllFiles){
+          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:20px;text-align:center;color:#ff8b8b;font-size:13px;">API de navegação não disponível. Use a aba Manual.</div>';
+          loadingEl.style.display='none';
+          return;
+        }
+        // gdiListAllFiles(path, pw, onPage) — retorna todos os files recursivamente
+        // Mas para o navegador, queremos só os folders FILHOS diretos
+        // Estratégia: chama gdiListAllFiles e filtra só folders não-recursivos
+        // (se houver muitos, mostra os primeiros 100)
+        const allFiles=[];
         const pw=window.gdiGetPw?window.gdiGetPw():'';
-        let allFiles=[];
-        // 1ª tentativa: gdiListAllFiles do host
-        if(window.gdiListAllFiles){
-          try{
-            console.log('[AddCourse] navegando para:',currentPath);
-            const result=await window.gdiListAllFiles(currentPath, pw);
-            if(Array.isArray(result))allFiles=result;
-          }catch(e){console.warn('[AddCourse] gdiListAllFiles falhou:',e.message);}
-        }
-        // 2ª tentativa: fetch direto (mesmo formato do host)
-        if(!allFiles.length && currentPath!=='/'){
-          console.log('[AddCourse] gdiListAllFiles vazio — tentando fetch direto');
-          try{
-            const ctrl=new AbortController();
-            const to=setTimeout(()=>ctrl.abort(),15000);
-            const r=await fetch(currentPath,{
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({password:pw||'',page_token:'',page_index:0}),
-              signal:ctrl.signal
-            });
-            clearTimeout(to);
-            if(r.ok){
-              const d=await r.json();
-              if(d&&d.data&&Array.isArray(d.data.files))allFiles=d.data.files;
-              console.log('[AddCourse] fetch direto OK — '+allFiles.length+' arquivos');
-            }else{
-              console.warn('[AddCourse] fetch direto HTTP',r.status);
-            }
-          }catch(e){console.warn('[AddCourse] fetch direto falhou:',e.message);}
-        }
-        // Filtra só folders + arquivos relevantes
+        // Flag para saber se já recebemos primeira página
+        let firstBatch=true;
+        await window.gdiListAllFiles(currentPath, pw, (filesSoFar)=>{
+          // page callback — não usamos incremental aqui
+        }).then(all=>{
+          if(!Array.isArray(all)){allFiles.length=0;return;}
+          allFiles.push(...all);
+        }).catch(e=>{console.warn('[AddCourse] gdiListAllFiles falhou:',e.message);});
+        // Filtra só folders, e dedup por path/name
         const seen=new Set();
         const folders=[];
         const pdfs=[];
@@ -1845,58 +1820,25 @@
         for(const f of allFiles){
           if(!f)continue;
           if(isFolder(f)){
+            const fp=getFolderPath(f)||'';
             const fn=getFileName(f);
-            // ★ FIX: muitos workers não retornam .path no file — monta path relativo
-            const fp=getFolderPath(f);
-            // dedup por nome dentro da pasta atual
             const k=fp+'|'+fn;
             if(seen.has(k))continue;
             seen.add(k);
             folders.push(f);
           }else if(f.mimeType&&(f.mimeType.includes('pdf')||f.mimeType.includes('video'))){
-            if(f.mimeType.includes('pdf'))pdfs.push(f);
-            if(f.mimeType.includes('video'))videos.push(f);
+            pdfs.push(f);
           }
         }
         loadingEl.style.display='none';
-        // ★ Debug log visível no console
-        console.log('[AddCourse] '+allFiles.length+' arquivos | '+folders.length+' pastas | '+pdfs.length+' PDFs | '+videos.length+' vídeos');
-        if(!folders.length && !pdfs.length && !videos.length){
-          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhum arquivo encontrado aqui.<br><span style="font-size:11px;color:var(--ferreto-text-faint,#6b7488);">Verifique se o caminho existe ou se você está logado.</span></div>';
-        }else if(!folders.length){
-          // pasta folha — só arquivos
-          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma subpasta aqui.<br>Esta é uma pasta folha — você pode selecioná-la como curso abaixo.</div>';
-          // mostra os arquivos como info
-          const filesInfo=document.createElement('div');
-          filesInfo.style.cssText='grid-column:1/-1;display:flex;flex-direction:column;gap:4px;padding:8px;';
-          pdfs.slice(0,10).forEach(p=>{
-            const row=document.createElement('div');
-            row.style.cssText='font-size:11px;color:var(--ferreto-text-muted,#8b949e);padding:4px 8px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border-radius:6px;';
-            row.innerHTML='<i class="bi bi-file-earmark-pdf" style="color:#ff6b6b;"></i> '+esc(getFileName(p));
-            filesInfo.appendChild(row);
-          });
-          videos.slice(0,10).forEach(v=>{
-            const row=document.createElement('div');
-            row.style.cssText='font-size:11px;color:var(--ferreto-text-muted,#8b949e);padding:4px 8px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border-radius:6px;';
-            row.innerHTML='<i class="bi bi-camera-video" style="color:#5ddeda;"></i> '+esc(getFileName(v));
-            filesInfo.appendChild(row);
-          });
-          foldersEl.appendChild(filesInfo);
+        if(!folders.length){
+          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma subpasta aqui. Esta é uma pasta folha — você pode selecioná-la como curso.</div>';
         }else{
-          foldersEl.innerHTML=folders.slice(0,200).map(f=>{
+          foldersEl.innerHTML=folders.slice(0,100).map(f=>{
             const fp=getFolderPath(f);
             const fn=getFileName(f);
-            // ★ FIX: monta target path robusto. Se file tem .path, usa. Senão monta com currentPath + nome
-            let target;
-            if(fp){
-              target=fp;
-            }else{
-              // garante trailing slash no currentPath antes de append
-              const base=currentPath.endsWith('/')?currentPath:currentPath+'/';
-              target=base+encodeURIComponent(fn);
-            }
-            // garante que target também é um path válido (termina com / se for folder)
-            if(!target.endsWith('/'))target=target+'/';
+            // path alvo: se temos folderPath, usa; senão monta com currentPath+'/'+name
+            const target=fp||(currentPath.endsWith('/')?currentPath+encodeURIComponent(fn):currentPath+'/'+encodeURIComponent(fn));
             return `<div class="gdi-amc-folder-card" data-p="${esc(target)}" data-n="${esc(fn)}" style="padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;transition:all .15s;">
               <div style="display:flex;align-items:center;gap:8px;">
                 <i class="bi bi-folder-fill" style="color:var(--ferreto-secondary,#5ddeda);font-size:18px;flex:none;"></i>
@@ -1911,9 +1853,10 @@
             card.onclick=()=>navigate(card.dataset.p);
           });
         }
-        // mostra info da pasta atual
+        // mostra info da pasta atual (PDFs/vídeos encontrados recursivamente)
         const totalPdfs=pdfs.length;
-        const totalVideos=videos.length;
+        const totalVideos=pdfs.filter(f=>f.mimeType&&f.mimeType.includes('video')).length;
+        const totalMaterias=pdfs.filter(f=>f.mimeType&&f.mimeType.includes('pdf')).length;
         if(currentPath!=='/'){
           const segs=pathSegments(currentPath);
           const courseName=decodeURIComponent(getDriveName(segs[segs.length-1]));
@@ -1924,12 +1867,12 @@
             <div style="font-size:30px;flex:none;">📁</div>
             <div style="flex:1;min-width:200px;">
               <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${esc(courseName)}</b>
-              <div style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${totalPdfs} PDF(s) · ${totalVideos} vídeo(s) nesta pasta</div>
-              <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:2px;font-family:'JetBrains Mono',monospace;word-break:break-all;">${esc(currentPath)}</div>
+              <div style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${totalMaterias} PDF(s) · ${totalVideos} vídeo(s) encontrados</div>
+              <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:2px;font-family:'JetBrains Mono',monospace;">${esc(currentPath)}</div>
             </div>
             <button id="gdi-amc-select-current" style="padding:8px 14px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:12px;">✓ Selecionar esta pasta</button>
           </div>`;
-          currentInfoEl.querySelector('#gdi-amc-select-current').onclick=()=>doAddCourseFromDrive(currentPath, courseName, totalPdfs);
+          currentInfoEl.querySelector('#gdi-amc-select-current').onclick=()=>doAddCourseFromDrive(currentPath, courseName, totalMaterias);
           saveBtn.textContent='✓ Adicionar "'+courseName.slice(0,30)+'"';
         }else{
           selectedPath=null;
@@ -1938,7 +1881,6 @@
           saveBtn.textContent='📂 Selecione uma pasta primeiro';
         }
       }catch(e){
-        console.error('[AddCourse] erro ao navegar:',e);
         loadingEl.style.display='none';
         foldersEl.innerHTML='<div style="grid-column:1/-1;padding:20px;text-align:center;color:#ff8b8b;font-size:13px;">Erro: '+esc(e.message)+'</div>';
       }
@@ -2104,7 +2046,7 @@
           card.innerHTML=`<div style="display:flex;align-items:center;gap:8px;"><i class="bi bi-hdd-stack-fill" style="color:var(--ferreto-primary,#ff8b9f);font-size:18px;flex:none;"></i><b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">${esc(dn)}</b><i class="bi bi-chevron-right" style="color:var(--ferreto-text-faint,#6b7488);font-size:12px;flex:none;margin-left:auto;"></i></div>`;
           card.onmouseenter=()=>{card.style.borderColor='var(--ferreto-primary,#ff8b9f)';card.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';};
           card.onmouseleave=()=>{card.style.borderColor='var(--ferreto-border,#30363d)';card.style.background='var(--ferreto-surface-2,rgba(255,255,255,.04))';};
-          card.onclick=()=>navigate('/'+i+':/');  // ★ FIX: passa path normalizado /0:/ (com slash)
+          card.onclick=()=>navigate('/'+i+':');
           foldersEl.appendChild(card);
         });
         currentInfoEl.style.display='none';
