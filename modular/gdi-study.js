@@ -1,11 +1,4 @@
 // ═══════════════════════════════════════════════════════════════
-// gdi-study.js — v2.7-PLANO-A — bootstrap login + brain + leis desatualizadas
-// ★ VERSION MARKER — verifique no console: window.GDI_STUDY_VERSION
-// ═══════════════════════════════════════════════════════════════
-window.GDI_STUDY_VERSION='v2.7-PLANO-A-2025-09-19';
-console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
-
-// ═══════════════════════════════════════════════════════════════
 // gdi-study.js — Central de Estudos + Estudo Ativo + Visual
 // 
 // Módulos:
@@ -3004,20 +2997,12 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
     const params=new URLSearchParams(window.location.search);
     const shouldOpenCentral=params.get('central')==='1';
     if(!shouldOpenCentral){
-      // ★ Mesmo sem ?central=1, abre Central se:
-      // 1. usuário está logado (GDIUser.loaded())
-      // 2. está na homepage (path === '/') — não atrapalha quando assiste aula
-      // 3. não tem cursos manuais adicionados (precisa adicionar)
-      // 4. ainda não abriu Central nesta sessão do navegador (sessionStorage)
       try{
         const manual=lsGet('gdi-manual-courses-v1',[]);
-        const isHomepage=window.location.pathname==='/'||window.location.pathname==='/0:'||window.location.pathname==='/0:/';
-        const alreadyOpened=sessionStorage.getItem('gdi-central-auto-opened')==='1';
-        const isLogged=window.GDIUser && window.GDIUser.loaded && window.GDIUser.loaded();
-        console.log('[GDI M22] verificação extra | homepage:',isHomepage,'| manual:',manual.length,'| logged:',isLogged,'| já abriu:',alreadyOpened);
-        if(isLogged && isHomepage && manual.length===0 && !alreadyOpened){
-          console.log('[GDI M22] ★ usuário logado sem cursos na homepage — abrindo Central');
-          sessionStorage.setItem('gdi-central-auto-opened','1');
+        const watched=Object.keys((window.GDIUser&&window.GDIUser.dump&&window.GDIUser.dump().watched)||{});
+        if(window.GDIUser && window.GDIUser.loaded && window.GDIUser.loaded()
+           && manual.length===0 && watched.length===0){
+          console.log('[GDI M22] usuário logado sem cursos — abrindo Central');
           setTimeout(()=>tryOpenCentralAndPrompt(),1500);
         }
       }catch(_){}
