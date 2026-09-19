@@ -419,8 +419,7 @@
     // as primeiras 15 páginas já dão contexto suficiente para a Meggy gerar
     // resumo + questões + pílulas úteis.
     if(!txt.trim()||txt.trim().length<50){
-      console.log('[Meggy] PDF sem texto selecionável — ativando OCR (Tesseract.js)');
-      const ocrMaxPages=Math.min(doc.numPages,15);
+            const ocrMaxPages=Math.min(doc.numPages,15);
       if(progressCb)progressCb({phase:'ocr-init',page:0,total:ocrMaxPages});
       try{
         let ocrTxt='';
@@ -879,8 +878,7 @@
       // flashcards do cache
       if(cached.questions.length)autoCreateFlashcards(cached.questions,lesson,lessonKey());
       saveIsaSummary(lesson,_chainCache[key].summary);
-      console.log('[Meggy] cache completo do Drive — sem retrabalho');
-      return _chainCache[key];
+            return _chainCache[key];
     }
 
     // só extrai PDF se precisa gerar algo
@@ -2489,8 +2487,7 @@
       // Nenhum backend disponível — esconde o botão mas mantém o código.
       // Ativa automaticamente quando o usuário configurar ZHIPU_API_KEY.
       hideWidget();
-      console.log('[Meggy] widget oculto — configure ZHIPU_API_KEY no Cloudflare para ativar');
-    }
+          }
   });
 
   // badge de novidade após 8s se nunca abriu (só se visível)

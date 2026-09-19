@@ -2,8 +2,6 @@
 // gdi-study.js — v2.7-PLANO-A — bootstrap login + brain + leis desatualizadas
 // ★ VERSION MARKER — verifique no console: window.GDI_STUDY_VERSION
 // ═══════════════════════════════════════════════════════════════
-window.GDI_STUDY_VERSION='v2.7-PLANO-A-2025-09-19';
-console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
 
 // ═══════════════════════════════════════════════════════════════
 // gdi-study.js — Central de Estudos + Estudo Ativo + Visual
@@ -510,6 +508,8 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
       let hits=0;
       answers.forEach(a=>{if(a){gradeQ(a.id,a.acertou);if(a.acertou)hits++;}});
       const total=queue.length;
+        // ★ FIX: atualiza contador de simulados para conquistas
+        try{localStorage.setItem('gdi-simulados-count',String((window.gdiAchievements?window.gdiAchievements:undefined)||(lsGet('gdi-simulados-v1',[]).length)));}catch(_){}
       // anti-duplicação: se já existe salvo neste segundo, pula
       const recent=simus().find(s=>s.date>Date.now()-2000);
       if(!recent){
@@ -738,8 +738,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
     try{
       // ★ 2) chamar persistência — função global self-contained
       await window.gdiAddCourseFromDrive(p, n, pdfs);
-      console.log('[AddCourse] ★ curso adicionado com sucesso');
-    }catch(err){
+          }catch(err){
       console.error('[AddCourse] ERRO:',err);
       if(window.showToast)showToast('Erro: '+err.message);
       // restaura botão em caso de erro
@@ -779,10 +778,8 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
           manual:true,path:coursePath,courseKey:coursePath
         });
         lsSet(LS_MANUAL,manual);
-        console.log('[AddCourse] ★ curso SALVO no localStorage (rápido)');
-      }else{
-        console.log('[AddCourse] curso já existe no localStorage — vai apenas fechar e disparar batalhão');
-      }
+              }else{
+              }
 
       // ★ 2) POST /api/courses/add — salva em general_courses.json no Drive (compartilhado)
       // Não-bloqueante: se falhar, mostra warning mas continua o fluxo
@@ -816,19 +813,16 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         try{
           if(typeof window.gdiRefreshCentralPanel==='function'){
             window.gdiRefreshCentralPanel();
-            console.log('[AddCourse] ★ painel re-renderizado');
-          }else if(typeof window.renderCursos==='function'){
+                      }else if(typeof window.renderCursos==='function'){
             window.renderCursos(box);
-            console.log('[AddCourse] ★ renderCursos() chamado');
-          }
+                      }
         }catch(e){console.warn('[AddCourse] erro ao re-renderizar:',e.message);}
       }
 
       // ★ 5) fecha modal — agora que tudo está salvo
       if(overlay&&overlay.parentNode){
         overlay.remove();
-        console.log('[AddCourse] ★ modal fechado');
-      }
+              }
 
       // ★ 6) dispara batalhão em background (não-bloqueante)
       // O batalhão no worker vai:
@@ -841,14 +835,12 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
       //     • questoes/<course>_<date>.json    → aba Questões
       //     • simulados/<course>_<date>.json  → aba Simulados
       //   - também salva em pool compartilhado (outros alunos com mesmo curso = cache hit)
-      console.log('[AddCourse] disparando batalhão em background...');
-      try{
+            try{
         if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
           window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
             console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
           });
-          console.log('[AddCourse] ★ batalhão disparado — vai gerar materiais em subpastas');
-        }else{
+                  }else{
           console.warn('[AddCourse] gdiIsaPdf.startBattalion indisponível — batalhão não disparado');
         }
       }catch(e){console.warn('[Batalhão] falha:',e.message);}
@@ -873,14 +865,12 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
       // só captura se o target for o botão Selecionar
       const btn=e.target.closest && e.target.closest('#gdi-amc-select-current');
       if(!btn)return;
-      console.log('[AddCourse] ★ clique capturado via document delegation');
-      e.preventDefault();
+            e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
       if(window.gdiAddCourseFromButton)window.gdiAddCourseFromButton(btn);
     },true);  // capture phase
-    console.log('[GDI M22] event delegation global para #gdi-amc-select-current atachado');
-  }
+      }
 
   let rescue=null,rescueAt=0;
   function ensureState(){
@@ -1114,7 +1104,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
     // streak
     const watch=lsGet(LS_WATCH,{});
     const acts={};const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
-    for(const k in watch)touch(watch[k]&&watch[k].at);
+    for(const k in watch){const v=watch[k];if(typeof v==='number'&&v>60)touch(new Date(k+'T12:00:00').getTime());else if(v&&v.at)touch(v.at);}
     let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
     if(!has(dd))dd.setDate(dd.getDate()-1);
     while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
@@ -1139,6 +1129,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         {id:'trails',icon:'bi-signpost-2',label:'Trilhas'}
       ]},
       {label:'Materiais',tabs:[
+        {id:'addmateria',icon:'bi-folder-plus',label:'Adicionar matéria'},
         {id:'resumos',icon:'bi-clipboard',label:'Resumos'},
         {id:'provas',icon:'bi-file-earmark-text',label:'Provas'},
         {id:'redacao',icon:'bi-pencil-square',label:'Redação'}
@@ -1205,6 +1196,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
       tab=b.dataset.t;FC.active=false;renderPanel();
     });
     const body=panel.querySelector('#gdi-central-body');
+    if(tab==='addmateria'){showAddCourseModal(body);return;}
     if(tab==='home')renderHome(body);
     else if(tab==='cursos')renderCursos(body);
     else if(tab==='questoes')renderQuestoes(body);
@@ -2049,8 +2041,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         }
         // 2ª tentativa: fetch direto (mesmo formato do host)
         if(!allFiles.length && currentPath!=='/'){
-          console.log('[AddCourse] gdiListAllFiles vazio — tentando fetch direto');
-          try{
+                    try{
             const ctrl=new AbortController();
             const to=setTimeout(()=>ctrl.abort(),15000);
             const r=await fetch(currentPath,{
@@ -2063,8 +2054,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
             if(r.ok){
               const d=await r.json();
               if(d&&d.data&&Array.isArray(d.data.files))allFiles=d.data.files;
-              console.log('[AddCourse] fetch direto OK — '+allFiles.length+' arquivos');
-            }else{
+                          }else{
               console.warn('[AddCourse] fetch direto HTTP',r.status);
             }
           }catch(e){console.warn('[AddCourse] fetch direto falhou:',e.message);}
@@ -2092,8 +2082,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         }
         loadingEl.style.display='none';
         // ★ Debug log visível no console
-        console.log('[AddCourse] '+allFiles.length+' arquivos | '+folders.length+' pastas | '+pdfs.length+' PDFs | '+videos.length+' vídeos');
-        if(!folders.length && !pdfs.length && !videos.length){
+                if(!folders.length && !pdfs.length && !videos.length){
           foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhum arquivo encontrado aqui.<br><span style="font-size:11px;color:var(--ferreto-text-faint,#6b7488);">Verifique se o caminho existe ou se você está logado.</span></div>';
         }else if(!folders.length){
           // pasta folha — só arquivos
@@ -2188,8 +2177,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         const manual=lsGet(LS_MANUAL,[]);
         // evita duplicar
         if(manual.some(c=>c.path===coursePath)){
-          console.log('[AddCourse] curso já existe — abortando');
-          showToast('Curso "'+courseName+'" já está adicionado');
+                    showToast('Curso "'+courseName+'" já está adicionado');
           return;
         }
         const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
@@ -2199,8 +2187,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
           manual:true,path:coursePath,courseKey:coursePath
         });
         lsSet(LS_MANUAL,manual);
-        console.log('[AddCourse] ★ curso SALVO no localStorage. Próximo: salvar no Drive + toast + re-render + fechar modal');
-
+        
         // ★ FIX: salva também no Drive via /api/courses/add (para persistir entre sessões/logouts)
         try{
           const r=await fetch('/api/courses/add',{
@@ -2224,29 +2211,25 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         // ★ TEORIA #3: chama renderCursos ANTES de remover overlay (lista atualizada quando modal fecha)
         try{
           renderCursos(box);
-          console.log('[AddCourse] ★ renderCursos() concluído');
-        }catch(e){
+                  }catch(e){
           console.warn('[AddCourse] erro ao re-renderizar:',e.message);
         }
 
         // ★ TEORIA #2: só fecha modal DEPOIS de salvar + re-renderizar (evita "fecha sem nada acontecer")
         if(overlay&&overlay.parentNode){
           overlay.remove();
-          console.log('[AddCourse] ★ modal fechado');
-        }
+                  }
 
         // ★ BATALHÃO: dispara processamento em background (depois que modal já fechou)
         // Não precisa extrair PDFs no front — o batalhão no worker escaneia tudo via gdiListAllFiles
-        console.log('[AddCourse] disparando batalhão em background...');
-        try{
+                try{
           // apenas dispara o batalhão — não espera ( é async em background)
           if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
             // payload mínimo: o worker vai escanear o coursePath e descobrir PDFs sozinho
             window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
               console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
             });
-            console.log('[AddCourse] ★ batalhão disparado em background');
-          }else{
+                      }else{
             console.warn('[AddCourse] gdiIsaPdf.startBattalion não disponível — batalhão não disparado');
           }
         }catch(e){console.warn('[Batalhão] falha:',e.message);}
@@ -2336,8 +2319,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
             showToast('Navegue até uma pasta e clique em "Selecionar esta pasta"');
             return;
           }
-          console.log('[AddCourse] chamando doAddCourseFromDrive via save button');
-          await doAddCourseFromDrive(selectedPath, selectedName, 0);
+                    await doAddCourseFromDrive(selectedPath, selectedName, 0);
         }else{
           // modo manual
           const name=overlay.querySelector('#gdi-amc-name').value.trim();
@@ -3370,7 +3352,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${v.correct} acertos · ${v.wrong} erros · ${v.total} total</span>
-          ${linked?'<span style="color:var(--ferreto-primary,#ff8b9f);font-size:10px;"><i class=\"bi bi-link-45deg\"></i> Meus Cursos</span>':''}
+          ${linkedKey?'<span style="color:var(--ferreto-primary,#ff8b9f);font-size:10px;"><i class="bi bi-link-45deg"></i> Meus Cursos</span>':''}
         </div>
         <div style="height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;">
           <div style="height:100%;width:${pct}%;background:${c};border-radius:3px;transition:width .3s;"></div>

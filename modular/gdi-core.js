@@ -71,7 +71,7 @@ window.gdiSrsIntervals = [1,3,7,21,60];
 // Onboarding: tour inicial para novos usuários
 window.gdiTrails = window.gdiTrails || {
   LS:'gdi-trails-v1',
-  get(){const v=localStorage.getItem(this.LS);return v?JSON.parse(v):[];},
+  get(){try{const v=localStorage.getItem(this.LS);return v?JSON.parse(v):[];}catch(_){return [];}},
   save(t){const arr=this.get();const i=arr.findIndex(x=>x.id===t.id);if(i>=0)arr[i]=t;else arr.push(t);try{localStorage.setItem(this.LS,JSON.stringify(arr));}catch(_){}},
   delete(id){try{localStorage.setItem(this.LS,JSON.stringify(this.get().filter(x=>x.id!==id)));}catch(_){}}
 };
