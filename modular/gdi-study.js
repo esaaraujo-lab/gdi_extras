@@ -701,6 +701,180 @@
   const fmtMin=m=>{m=Math.round(m);return m>=60?Math.floor(m/60)+'h'+String(m%60).padStart(2,'0'):m+'min'};
   const dayKey=t=>{const d=new Date(t||Date.now());return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
   const dateBr=t=>new Date(t).toLocaleDateString('pt-BR');
+
+  // ═══ HANDLER GLOBAL DE ADICIONAR CURSO (definido no carregamento do módulo) ═══
+  // Sempre disponível — não depende de showAddCourseModal ter rodado.
+  // Self-contained: usa DOM queries para achar overlay e box, sem closures.
+  // Inline onclick chama window.gdiAddCourseFromButton(this); addEventListener no document
+  // também captura cliques (fallback caso CSP bloqueie inline handlers).
+  window.gdiAddCourseFromButton=async function(btn){
+    console.log('[AddCourse] ★ gdiAddCourseFromButton CHAMADO | btn:',btn);
+    if(!btn){
+      console.error('[AddCourse] botão null');
+      return;
+    }
+    const p=btn.dataset.path||'';
+    const n=btn.dataset.name||'Pasta';
+    const pdfs=parseInt(btn.dataset.pdfs||'0',10);
+    console.log('[AddCourse] dataset | path:',p,'| name:',n,'| pdfs:',pdfs);
+    if(!p){
+      console.error('[AddCourse] data-path vazio — abortando');
+      if(window.showToast)showToast('Erro: pasta não selecionada');
+      return;
+    }
+    // ★ 1) feedback visual imediato
+    const originalText=btn.textContent;
+    btn.disabled=true;
+    btn.style.opacity='0.6';
+    btn.style.pointerEvents='none';
+    btn.innerHTML='<i class="bi bi-hourglass-split"></i> Adicionando...';
+    try{
+      // ★ 2) chamar persistência — função global self-contained
+      await window.gdiAddCourseFromDrive(p, n, pdfs);
+      console.log('[AddCourse] ★ curso adicionado com sucesso');
+    }catch(err){
+      console.error('[AddCourse] ERRO:',err);
+      if(window.showToast)showToast('Erro: '+err.message);
+      // restaura botão em caso de erro
+      btn.disabled=false;
+      btn.style.opacity='1';
+      btn.style.pointerEvents='auto';
+      btn.textContent=originalText;
+    }
+  };
+
+  // ★ Função global self-contained: adiciona curso do Drive
+  // Fluxo:
+  //   1. Salva no localStorage (rápido — aparece imediatamente na lista do aluno)
+  //   2. POST /api/courses/add → salva em general_courses.json no Drive (compartilhado entre usuários)
+  //   3. Re-renderiza lista de cursos
+  //   4. Fecha modal
+  //   5. Dispara batalhão em background (não-bloqueante) → cria materiais em subpastas:
+  //      resumos/, cards/, pilulas/, questoes/, simulados/ dentro da pasta do aluno no Drive
+  window.gdiAddCourseFromDrive=async function(coursePath, courseName, pdfCount){
+    console.log('[AddCourse] gdiAddCourseFromDrive iniciado:',coursePath,'|',courseName);
+    const overlay=document.querySelector('.gdi-modal-overlay');
+    const box=document.getElementById('gdi-central-body');
+    const LS_MANUAL='gdi-manual-courses-v1';
+    const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(_){return d}};
+    const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}};
+
+    try{
+      const manual=lsGet(LS_MANUAL,[]);
+      const alreadyExists=manual.some(c=>c.path===coursePath);
+
+      if(!alreadyExists){
+        // ★ 1) SALVA no localStorage — aparece imediatamente na lista do aluno
+        const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+        manual.push({
+          id:courseId,name:courseName,icon:'📁',color:'#5ddeda',
+          goal:60,notes:'',createdAt:Date.now(),
+          manual:true,path:coursePath,courseKey:coursePath
+        });
+        lsSet(LS_MANUAL,manual);
+        console.log('[AddCourse] ★ curso SALVO no localStorage (rápido)');
+      }else{
+        console.log('[AddCourse] curso já existe no localStorage — vai apenas fechar e disparar batalhão');
+      }
+
+      // ★ 2) POST /api/courses/add — salva em general_courses.json no Drive (compartilhado)
+      // Não-bloqueante: se falhar, mostra warning mas continua o fluxo
+      try{
+        const r=await fetch('/api/courses/add',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            coursePath,courseName,
+            pdfCount:pdfCount||0,
+            addedAt:Date.now()
+          })
+        });
+        if(r.ok){
+          const d=await r.json().catch(()=>({}));
+          console.log('[AddCourse] ★ salvo em general_courses.json no Drive | resposta:',d);
+        }else{
+          console.warn('[AddCourse] /api/courses/add HTTP',r.status,'— continuando mesmo assim');
+        }
+      }catch(e){
+        console.warn('[AddCourse] falha ao salvar no Drive (continuando):',e.message);
+      }
+
+      // ★ 3) feedback visual: toast
+      if(window.showToast)showToast(alreadyExists
+        ? 'Curso já estava adicionado — Meggy continua trabalhando em background 🐩'
+        : 'Curso "'+courseName+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
+
+      // ★ 4) re-renderiza lista de cursos ANTES de fechar modal
+      if(box){
+        try{
+          if(typeof window.gdiRefreshCentralPanel==='function'){
+            window.gdiRefreshCentralPanel();
+            console.log('[AddCourse] ★ painel re-renderizado');
+          }else if(typeof window.renderCursos==='function'){
+            window.renderCursos(box);
+            console.log('[AddCourse] ★ renderCursos() chamado');
+          }
+        }catch(e){console.warn('[AddCourse] erro ao re-renderizar:',e.message);}
+      }
+
+      // ★ 5) fecha modal — agora que tudo está salvo
+      if(overlay&&overlay.parentNode){
+        overlay.remove();
+        console.log('[AddCourse] ★ modal fechado');
+      }
+
+      // ★ 6) dispara batalhão em background (não-bloqueante)
+      // O batalhão no worker vai:
+      //   - escanear coursePath via gdiListAllFiles
+      //   - para cada PDF, gerar: resumo, pílulas, questões, flashcards, simulado
+      //   - salvar cada tipo em sua respectiva subpasta na pasta do aluno no Drive:
+      //     • resumos/<course>_<date>.md       → aba Resumos
+      //     • cards/<course>_<date>.json       → aba Flashcards
+      //     • pilulas/<course>_<date>.md       → aba Pílulas
+      //     • questoes/<course>_<date>.json    → aba Questões
+      //     • simulados/<course>_<date>.json  → aba Simulados
+      //   - também salva em pool compartilhado (outros alunos com mesmo curso = cache hit)
+      console.log('[AddCourse] disparando batalhão em background...');
+      try{
+        if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+          window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
+            console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
+          });
+          console.log('[AddCourse] ★ batalhão disparado — vai gerar materiais em subpastas');
+        }else{
+          console.warn('[AddCourse] gdiIsaPdf.startBattalion indisponível — batalhão não disparado');
+        }
+      }catch(e){console.warn('[Batalhão] falha:',e.message);}
+
+    }catch(e){
+      console.error('[AddCourse] erro fatal em gdiAddCourseFromDrive:',e);
+      if(window.showToast)showToast('Erro ao adicionar curso: '+e.message);
+      // fecha modal mesmo com erro — não trava o aluno
+      if(overlay&&overlay.parentNode)overlay.remove();
+      throw e;
+    }
+  };
+
+  // ★ EVENT DELEGATION EM NÍVEL DE DOCUMENT (capture phase) — fallback máximo
+  // Captura QUALQUER clique em #gdi-amc-select-current, não importa onde esteja no DOM.
+  // Não depende de inline onclick (que pode ser bloqueado por CSP).
+  // Não depende de overlay (que pode ter sido removido).
+  // Definido UMA vez no carregamento do módulo.
+  if(!window.__gdiAddCourseDelegationAttached){
+    window.__gdiAddCourseDelegationAttached=true;
+    document.addEventListener('click',async(e)=>{
+      // só captura se o target for o botão Selecionar
+      const btn=e.target.closest && e.target.closest('#gdi-amc-select-current');
+      if(!btn)return;
+      console.log('[AddCourse] ★ clique capturado via document delegation');
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if(window.gdiAddCourseFromButton)window.gdiAddCourseFromButton(btn);
+    },true);  // capture phase
+    console.log('[GDI M22] event delegation global para #gdi-amc-select-current atachado');
+  }
+
   let rescue=null,rescueAt=0;
   function ensureState(){
     if(rescue&&Date.now()-rescueAt<60000)return Promise.resolve(rescue);
@@ -1932,7 +2106,7 @@
               <div style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${totalPdfs} PDF(s) · ${totalVideos} vídeo(s) nesta pasta</div>
               <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:2px;font-family:'JetBrains Mono',monospace;word-break:break-all;">${esc(currentPath)}</div>
             </div>
-            <button id="gdi-amc-select-current" type="button" onclick="window.__gdiAddCourseFromButton(this)" data-path="${esc(currentPath)}" data-name="${esc(courseName)}" data-pdfs="${totalPdfs}" style="padding:10px 18px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:13px;flex:none;pointer-events:auto;">✓ Selecionar esta pasta</button>
+            <button id="gdi-amc-select-current" type="button" onclick="window.gdiAddCourseFromButton(this)" data-path="${esc(currentPath)}" data-name="${esc(courseName)}" data-pdfs="${totalPdfs}" style="padding:10px 18px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:13px;flex:none;pointer-events:auto;">✓ Selecionar esta pasta</button>
           </div>`;
           // ★ EVENT DELEGATION: handler anexado ao overlay, captura cliques no botão
           // não importa quantas vezes o botão for recriado por navigate()

@@ -2285,10 +2285,10 @@
   }
   function serverLabel(){
     if(_serverProvider==='nvidia-nim')return {name:'NVIDIA NIM',label:'NVIDIA NIM <b>(LLaMA · /api/ai)</b>'};
-    if(_serverProvider==='zhipu-ai')return {name:'智谱AI (Zhipu)',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
+    if(_serverProvider==='zhipu-ai')return {name:'Meggy AI',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
     if(_serverProvider==='cf-workers-ai')return {name:'CF Workers AI',label:'Cloudflare <b>(Workers AI · /api/ai)</b>'};
     if(_serverProvider==='openai')return {name:'OpenAI',label:'OpenAI <b>(/api/ai)</b>'};
-    return {name:'智谱AI (Zhipu)',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
+    return {name:'Meggy AI',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
   }
 
   // detecta a IA do navegador ao carregar (1×) + status do servidor

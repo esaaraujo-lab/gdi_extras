@@ -1754,7 +1754,7 @@ async function generateLink(file_id, user_ip) {
 //   Modelo padrão: glm-4-flash (rápido e econômico). Troque com
 //   AI_MODEL=glm-4-plus se quiser mais qualidade.
 // Ordem de prioridade:
-//   1) 智谱AI (Zhipu) via ZHIPU_API_KEY  ← PADRÃO (mesmo motor da demo)
+//   1) Meggy AI via ZHIPU_API_KEY  ← PADRÃO (mesmo motor da demo)
 //   2) Cloudflare Workers AI (binding AI) ← alternativo grátis
 //   3) Endpoint OpenAI-compat (OPENAI_API_KEY + OPENAI_API_URL)
 // System prompt contextualiza a IA como ISA — tutora do acervo.
