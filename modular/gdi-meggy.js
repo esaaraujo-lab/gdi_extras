@@ -535,9 +535,31 @@
   }
 
   // ── Summaries storage ──
-  function saveIsaSummary(lesson,summary){
+  // ★ FIX: agora salva também o path do curso e a matéria — para renderResumos agrupar corretamente
+  function saveIsaSummary(lesson, summary, coursePath, subject){
     const arr=lsGet(LS_SUM,[]);
-    arr.unshift({id:uid(),lesson:String(lesson||'Aula').slice(0,120),summary:String(summary||''),date:Date.now()});
+    // extrai course e subject do path se não vierem explícitos
+    // path típico: /7:/Sou + Carreiras Policiais 5.0/Bloco I - Direito Constitucional/01 - Aula.mp4
+    let derivedCourse=coursePath||'';
+    let derivedSubject=subject||'';
+    if(!derivedCourse){
+      // tenta derivar do lessonKey atual (URL do navegador)
+      const p=window.location.pathname||'';
+      const seg=p.split('/').filter(Boolean);
+      if(seg.length>=2){
+        // /7:/Curso/Materia/Aula → curso = seg[1], materia = seg[2] (se houver)
+        derivedCourse='/'+seg.slice(0,2).join('/')+'/';
+        if(seg.length>=3)derivedSubject=decodeURIComponent(seg[2]);
+      }
+    }
+    arr.unshift({
+      id:uid(),
+      lesson:String(lesson||'Aula').slice(0,200),
+      summary:String(summary||''),
+      path:derivedCourse,
+      subject:derivedSubject||'Geral',
+      date:Date.now()
+    });
     lsSet(LS_SUM,arr.slice(0,200));
   }
   function listIsaSummaries(){return lsGet(LS_SUM,[]);}
@@ -1916,20 +1938,56 @@
 
   window.renderResumos=function(box){
     const all=listIsaSummaries();
+    // ★ MIGRAÇÃO: para resumos antigos sem .path, tenta derivar do .lesson
+    // Ex: lesson "Sou + Carreiras Policiais 5.0 - 01 - Aula" → path default '/0:/Sou + Carreiras Policiais 5.0/'
+    for(const r of all){
+      if(!r.path){
+        // tenta extrair curso do lesson (antes do ' - ')
+        const lessonStr=r.lesson||'';
+        const dashIdx=lessonStr.indexOf(' - ');
+        if(dashIdx>0){
+          const courseName=lessonStr.slice(0, dashIdx).trim();
+          r.path='/0:/'+courseName+'/';
+          r.subject=r.subject||'Geral';
+        }
+      }
+      // se ainda não tem path, marca como órfão
+      if(!r.path)r.path='__sem_curso__';
+      if(!r.subject)r.subject='Geral';
+    }
     // ★ agrupar por curso (path do aluno), trilha e matéria
     const trails=(window.gdiTrails&&window.gdiTrails.get())||[];
     const subjects=(window.gdiSubjects&&window.gdiSubjects.get())||[];
     // tenta derivar curso do resumo (lesson = nome da aula → pega 1º segmento do path)
     function courseOf(r){
       const p=r.path||r.lessonKey||'';
-      if(p){const seg=p.split('/').filter(Boolean);if(seg.length>1)return seg.slice(0,2).join('/');}
+      if(p&&p!=='__sem_curso__'){
+        const seg=p.split('/').filter(Boolean);
+        if(seg.length>=2){
+          // /7:/Curso/Materia → retorna "/7:/Curso" (sem trailing slash)
+          return '/'+seg.slice(0,2).join('/');
+        }
+        if(seg.length===1)return seg[0];
+      }
+      // fallback: tenta extrair do lesson
+      const lessonStr=r.lesson||'';
+      const dashIdx=lessonStr.indexOf(' - ');
+      if(dashIdx>0)return lessonStr.slice(0, dashIdx).trim();
       return 'Sem curso';
     }
     function subjectOf(r){
-      // match com subjects manuais se houver nome parecido
-      const lesson=r.lesson||'';
-      const found=subjects.find(s=>lesson.toLowerCase().includes(s.name.toLowerCase()));
-      return found?found.name:'Geral';
+      if(r.subject&&r.subject!=='Geral')return r.subject;
+      // tenta extrair do lesson
+      const lessonStr=r.lesson||'';
+      const dashIdx=lessonStr.indexOf(' - ');
+      if(dashIdx>0){
+        const after=lessonStr.slice(dashIdx+3);
+        // se após o ' - ' houver outro ' - ', pega o primeiro segmento
+        const dash2=after.indexOf(' - ');
+        if(dash2>0)return after.slice(0,dash2).trim();
+        return after.trim();
+      }
+      return 'Geral';
     }
     const byCourse={};
     all.forEach(r=>{
@@ -2410,10 +2468,10 @@
   }
   function serverLabel(){
     if(_serverProvider==='nvidia-nim')return {name:'NVIDIA NIM',label:'NVIDIA NIM <b>(LLaMA · /api/ai)</b>'};
-    if(_serverProvider==='zhipu-ai')return {name:'Meggy AI',label:'Meggy AI <b>(Zhipu GLM · /api/ai)</b>'};
+    if(_serverProvider==='zhipu-ai')return {name:'智谱AI (Zhipu)',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
     if(_serverProvider==='cf-workers-ai')return {name:'CF Workers AI',label:'Cloudflare <b>(Workers AI · /api/ai)</b>'};
     if(_serverProvider==='openai')return {name:'OpenAI',label:'OpenAI <b>(/api/ai)</b>'};
-    return {name:'Meggy AI',label:'Meggy AI <b>(Zhipu GLM · /api/ai)</b>'};
+    return {name:'智谱AI (Zhipu)',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
   }
 
   // detecta a IA do navegador ao carregar (1×) + status do servidor
