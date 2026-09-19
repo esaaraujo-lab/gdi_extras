@@ -1088,11 +1088,8 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
     if(t)tab=t;
     if(!panel){
       panel=document.createElement('div');panel.id='gdi-central';
-      // ★ EMBEDDED: renderiza DENTRO de #content (não como overlay flutuante)
-      const content=document.getElementById('content')||document.body;
-      // limpa #content (remove a listagem de drives do app.min.js)
-      content.innerHTML='';
-      content.appendChild(panel);
+      panel.addEventListener('click',e=>{if(e.target===panel)closePanel();});
+      GDI_ROOT().appendChild(panel);
     }
     panel.style.display='flex';
     renderPanel();
@@ -1109,7 +1106,6 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
   // agora →" pode abrir a Central na aba Questões como fallback).
   window.__gdiOpenCentral=openPanel;
   function renderPanel(){
-    setTimeout(populateDriveBar,100);
     if(!panel)return;
     const t=todayMin(),g=goalMin(),pct=Math.min(100,Math.round(t/g*100));
     // ★ calcula stats para o header (streak, cards devidos)
@@ -1160,11 +1156,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         <div class="gdi-central-head-title">
           <span class="gdi-central-icon">📚</span>
           <b>Central de Estudos</b>
-        <div class="gdi-drive-bar" id="gdi-drive-bar" style="display:flex;gap:6px;padding:8px 16px;background:var(--ferreto-surface-2,rgba(255,255,255,.045));border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;flex-shrink:0;">
-        <span style="font-size:11px;color:var(--ferreto-text-faint,#6b7488);white-space:nowrap;align-self:center;margin-right:4px;"><i class="bi bi-hdd-stack"></i> DRIVES</span>
-        <div id="gdi-drive-icons" style="display:flex;gap:4px;"></div>
-      </div>
-    </div>
+        </div>
         <div class="gdi-central-stats">
           <span class="gdi-central-stat" title="Sequência de dias estudando">
             <i class="bi bi-fire gdi-stat-fire"></i>
@@ -2830,9 +2822,9 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
   if(!document.getElementById('gdi-central-style')){
     const s=document.createElement('style');s.id='gdi-central-style';s.textContent=`
 /* ═══ CENTRAL DE ESTUDOS v3 — design moderno (sidebar + dashboard) ═══ */
-#gdi-central{display:none;flex-direction:column;width:100%;height:calc(100vh - 54px);background:var(--ferreto-bg,#070910);color:var(--ferreto-text,#f3f5fa);font-family:var(--ferreto-font-body,'Rubik',sans-serif);overflow:hidden;}
+#gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);display:none;align-items:stretch;justify-content:stretch;padding:0;animation:gdi-central-in .25s ease;}
 @keyframes gdi-central-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
-.gdi-central-box{display:flex;flex-direction:column;height:100%;background:var(--ferreto-bg,#070910);border-radius:0;overflow:hidden;}
+.gdi-central-box{background:var(--ferreto-bg,#0f1218);border:0;border-radius:0;width:100%;max-width:none;max-height:100dvh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
 /* Header — minimalista, com stats rápidas */
 .gdi-central-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.05));flex-shrink:0;flex-wrap:nowrap;}
 .gdi-central-head-title{display:flex;align-items:center;gap:10px;flex-shrink:0;}
@@ -2848,7 +2840,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
 #gdi-central-x{margin-left:auto;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text-muted,#8b949e);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
 #gdi-central-x:hover{background:rgba(255,107,107,.15);color:#ff8b8b;border-color:rgba(255,107,107,.3);}
 /* Layout principal: sidebar + body */
-.gdi-central-main{display:flex;flex:1;min-height:0;overflow:hidden;}
+.gdi-central-main{flex:1;display:flex;overflow:hidden;}
 /* Sidebar */
 .gdi-central-sidebar{width:220px;flex-shrink:0;background:var(--ferreto-bg-2,#0d1119);border-right:1px solid var(--ferreto-border,#21262d);overflow-y:auto;padding:14px 10px;display:flex;flex-direction:column;gap:2px;}
 .gdi-central-sidebar::-webkit-scrollbar{width:6px;}
@@ -2931,11 +2923,6 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
 /* Z-index unificado para todos os modais */
 .gdi-modal-overlay{z-index:100000!important;}
 .gdi-fc{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:14px;padding:26px 20px;min-height:170px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;max-width:560px;margin:0 auto;}
-
-/* ★ FIX: esconder dropdown de drives do navbar (agora na barra inferior da Central) */
-.gdi-nav .dropdown, .navbar .dropdown, #nav .dropdown { display:none !important; }
-
-.gdi-drive-bar{display:flex;gap:6px;padding:10px 16px;background:var(--ferreto-surface-2,rgba(255,255,255,.045));border-top:2px solid var(--ferreto-border-strong,#30363d);overflow-x:auto;flex-shrink:0;z-index:10;}
 /* Responsive */
 @media(max-width:768px){
   .gdi-central-sidebar{width:60px;padding:10px 6px;}
@@ -3006,171 +2993,166 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
     if(e.code==='Space'){e.preventDefault();FC.flip&&FC.flip();}
     else if(e.key==='1'||e.key==='2'||e.key==='3'){FC.grade&&FC.grade(+e.key);}
   });
-
-  // ★ Barra de drives: popula ícones + lida com clique
-  function populateDriveBar(){
-    const bar=document.getElementById('gdi-drive-icons');
-    if(!bar)return;
-    bar.innerHTML='';
-    if(!window.drive_names||!window.drive_names.length){
-      bar.innerHTML='<span style="font-size:11px;color:var(--ferreto-text-faint,#6b7488);">Nenhum drive</span>';
-      return;
-    }
-    window.drive_names.forEach((dn,i)=>{
-      const btn=document.createElement('button');
-      btn.style.cssText='background:var(--ferreto-surface-3,rgba(255,255,255,.08));border:1px solid var(--ferreto-border,#21262d);border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--ferreto-text,#e6edf3);font-size:11px;white-space:nowrap;transition:all .15s;display:flex;align-items:center;gap:4px;';
-      btn.innerHTML='<i class="bi bi-hdd" style="color:var(--ferreto-primary,#ff8b9f);font-size:13px;"></i> '+dn.slice(0,15);
-      btn.onmouseenter=()=>{btn.style.borderColor='var(--ferreto-primary,#ff8b9f)';btn.style.background='rgba(255,139,159,.1)';};
-      btn.onmouseleave=()=>{btn.style.borderColor='var(--ferreto-border,#21262d)';btn.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';};
-      btn.onclick=()=>openDriveInContent('/'+i+':/', dn);
-      bar.appendChild(btn);
-    });
-  }
-  // ★ Abre listing do drive DENTRO da área de conteúdo da Central
-  function openDriveInContent(path, driveName){
-    console.log('[DriveBar] abrindo drive:',path,'|',driveName);
-    const body=panel&&panel.querySelector('#gdi-central-body');
-    if(!body){console.warn('[DriveBar] body não encontrado');return;}
-    // renderiza browser de drive inline
-    body.innerHTML='<div style="padding:16px;">'+
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'+
-        '<button id="gdi-drive-back" class="gdi-mode-btn" style="font-size:12px;"><i class="bi bi-arrow-left"></i> Voltar para Estudos</button>'+
-        '<b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;"><i class="bi bi-hdd"></i> '+driveName+'</b>'+
-        '<div id="gdi-drive-bc" style="flex:1;display:flex;gap:4px;align-items:center;font-size:12px;flex-wrap:wrap;"></div>'+
-      '</div>'+
-      '<div id="gdi-drive-loading" style="padding:40px;text-align:center;color:var(--ferreto-text-muted,#8b949e);"><div class="gdi-spinner" style="margin:0 auto 10px;"></div>Carregando pastas...</div>'+
-      '<div id="gdi-drive-folders" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;"></div>'+
-    '</div>';
-    // botão voltar
-    body.querySelector('#gdi-drive-back').onclick=()=>{renderPanel();populateDriveBar();};
-    // navega
-    navigateDriveInContent(path, driveName, body);
-  }
-  async function navigateDriveInContent(path, driveName, body){
-    const bcEl=body.querySelector('#gdi-drive-bc');
-    const foldersEl=body.querySelector('#gdi-drive-folders');
-    const loadingEl=body.querySelector('#gdi-drive-loading');
-    // breadcrumb
-    const segs=path.split('/').filter(Boolean);
-    let html='<span style="color:var(--ferreto-secondary,#5ddeda);cursor:pointer;" data-p="/'+segs[0]+'/"><i class="bi bi-house"></i></span>';
-    let acc='';
-    for(const s of segs){
-      acc+='/'+s;
-      const disp=decodeURIComponent(s);
-      html+='<span style="color:var(--ferreto-text-faint,#6b7488);">/</span><span style="cursor:pointer;color:var(--ferreto-text,#e6edf3);" data-p="'+acc+'/">'+disp.slice(0,20)+'</span>';
-    }
-    bcEl.innerHTML=html;
-    bcEl.querySelectorAll('[data-p]').forEach(el=>el.onclick=()=>navigateDriveInContent(el.dataset.p, driveName, body));
-    // loading
-    loadingEl.style.display='block';
-    foldersEl.innerHTML='';
-    // lista arquivos
-    let files=[];
-    try{
-      if(window.gdiListAllFiles){
-        files=await window.gdiListAllFiles(path, window.gdiGetPw?window.gdiGetPw():'');
-        if(!Array.isArray(files))files=[];
-      }
-      // ★ FIX: fallback de fetch direto se gdiListAllFiles retornar vazio
-      if(!files.length&&path!=='/'){
-        console.log('[DriveBar] gdiListAllFiles vazio — tentando fetch direto');
-        try{
-          const ctrl=new AbortController();
-          const to=setTimeout(()=>ctrl.abort(),15000);
-          const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:'',page_token:'',page_index:0}),signal:ctrl.signal});
-          clearTimeout(to);
-          if(r.ok){const d=await r.json();if(d&&d.data&&Array.isArray(d.data.files))files=d.data.files;console.log('[DriveBar] fetch direto OK:',files.length,'arquivos');}
-        }catch(e2){console.warn('[DriveBar] fetch direto falhou:',e2.message);}
-      }
-    }catch(e){console.warn('[DriveBar] erro ao listar:',e.message);}
-    loadingEl.style.display='none';
-    // separa folders e arquivos
-    const folders=files.filter(f=>f&&(f.mimeType==='application/vnd.google-apps.folder'||(f.mimeType&&f.mimeType.includes('folder'))));
-    const pdfs=files.filter(f=>f&&f.mimeType&&f.mimeType.includes('pdf'));
-    const videos=files.filter(f=>f&&f.mimeType&&f.mimeType.includes('video'));
-    if(!folders.length&&!pdfs.length&&!videos.length){
-      foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);">Nenhum arquivo aqui.</div>';
-      return;
-    }
-    foldersEl.innerHTML='';
-    // pastas
-    folders.slice(0,100).forEach(f=>{
-      const fn=f.name||f.title||'pasta';
-      let target=path.endsWith('/')?path+encodeURIComponent(fn):path+'/'+encodeURIComponent(fn);
-      if(!target.endsWith('/'))target=target+'/';  // ★ FIX: trailing slash obrigatório para o worker
-      const card=document.createElement('div');
-      card.style.cssText='padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;transition:all .15s;';
-      card.innerHTML='<div style="display:flex;align-items:center;gap:8px;">'+
-        '<i class="bi bi-folder-fill" style="color:var(--ferreto-secondary,#5ddeda);font-size:18px;flex:none;"></i>'+
-        '<b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+fn+'</b>'+
-        '<button class="gdi-drive-add" data-path="'+target+'" data-name="'+fn+'" style="background:var(--ferreto-grad);color:#fff;border:0;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;flex:none;font-weight:600;">+ Curso</button>'+
-        '</div>';
-      card.onmouseenter=()=>{card.style.borderColor='var(--ferreto-primary,#ff8b9f)';card.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';};
-      card.onmouseleave=()=>{card.style.borderColor='var(--ferreto-border,#30363d)';card.style.background='var(--ferreto-surface-2,rgba(255,255,255,.04))';};
-      card.querySelector('.gdi-drive-add').onclick=(e)=>{e.stopPropagation();if(window.gdiAddCourseFromButton)window.gdiAddCourseFromButton(e.target);};
-      card.onclick=()=>navigateDriveInContent(target, driveName, body);
-      foldersEl.appendChild(card);
-    });
-    // PDFs
-    pdfs.slice(0,20).forEach(f=>{
-      const fn=f.name||'PDF';
-      const card=document.createElement('div');
-      card.style.cssText='padding:10px 12px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;cursor:pointer;';
-      card.innerHTML='<i class="bi bi-file-earmark-pdf" style="color:#ff6b6b;"></i> <span style="color:var(--ferreto-text,#e6edf3);font-size:12px;">'+fn+'</span>';
-      card.onclick=()=>{if(f.path)window.location.href=f.path;};
-      foldersEl.appendChild(card);
-    });
-    // vídeos
-    videos.slice(0,20).forEach(f=>{
-      const fn=f.name||'Vídeo';
-      const card=document.createElement('div');
-      card.style.cssText='padding:10px 12px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;cursor:pointer;';
-      card.innerHTML='<i class="bi bi-camera-video" style="color:#5ddeda;"></i> <span style="color:var(--ferreto-text,#e6edf3);font-size:12px;">'+fn+'</span>';
-      card.onclick=()=>{if(f.path)window.location.href=f.path;};
-      foldersEl.appendChild(card);
-    });
-  }
-
   log('central de estudos ativa (v2.6 — aba na navbar, sem observer loop)');
 
   // PLANO A v2: Bootstrap robusto — Após login, redireciona para ?central=1
-  // ★ PLANO A v3: Central é a HOMEPAGE (embedded, não overlay)
-  // Sem bootstrap complicado — apenas abre a Central na homepage
-  function autoOpenCentralOnHomepage(){
-    const isHomepage=window.location.pathname==='/'||window.location.pathname==='/0:'||window.location.pathname==='/0:/';
-    if(!isHomepage)return;
-    console.log('[GDI M22] homepage detectada — abrindo Central embedded');
-    // espera #content estar disponível (app.min.js renderiza async)
-    let retries=0;
-    function tryOpen(){
-      retries++;
-      if(retries>30){console.warn('[GDI M22] desistindo de abrir Central após 30 tentativas');return;}
-      const content=document.getElementById('content');
-      if(!content||!content.innerHTML){setTimeout(tryOpen,200);return;}
-      // #content existe e tem conteúdo — toma posse
+  console.log('[GDI M22] ★ bootstrap Plano A v2 carregado');
+  window.gdiBootstrapCentral=()=>{console.log('[GDI M22] bootstrap manual');bootstrapCentralOnLogin();};
+
+  function bootstrapCentralOnLogin(){
+    console.log('[GDI M22] bootstrapCentralOnLogin rodando | URL:',window.location.search);
+    const params=new URLSearchParams(window.location.search);
+    const shouldOpenCentral=params.get('central')==='1';
+    if(!shouldOpenCentral){
+      // ★ Mesmo sem ?central=1, abre Central se:
+      // 1. usuário está logado (GDIUser.loaded())
+      // 2. está na homepage (path === '/') — não atrapalha quando assiste aula
+      // 3. não tem cursos manuais adicionados (precisa adicionar)
+      // 4. ainda não abriu Central nesta sessão do navegador (sessionStorage)
       try{
-        openPanel('home');
-        console.log('[GDI M22] ★ Central embedded aberta na homepage');
-      }catch(e){
-        console.warn('[GDI M22] erro ao abrir Central:',e.message);
-        setTimeout(tryOpen,300);
-      }
+        const manual=lsGet('gdi-manual-courses-v1',[]);
+        const isHomepage=window.location.pathname==='/'||window.location.pathname==='/0:'||window.location.pathname==='/0:/';
+        const alreadyOpened=sessionStorage.getItem('gdi-central-auto-opened')==='1';
+        const isLogged=window.GDIUser && window.GDIUser.loaded && window.GDIUser.loaded();
+        console.log('[GDI M22] verificação extra | homepage:',isHomepage,'| manual:',manual.length,'| logged:',isLogged,'| já abriu:',alreadyOpened);
+        if(isLogged && isHomepage && manual.length===0 && !alreadyOpened){
+          console.log('[GDI M22] ★ usuário logado sem cursos na homepage — abrindo Central');
+          sessionStorage.setItem('gdi-central-auto-opened','1');
+          setTimeout(()=>tryOpenCentralAndPrompt(),1500);
+        }
+      }catch(_){}
+      return;
     }
-    setTimeout(tryOpen,500);
+    console.log('[GDI M22] ★ ?central=1 detectado — abrindo Central');
+    // NÃO limpa URL ainda — só depois que Central abrir de fato
+    tryOpenCentralAndPrompt();
+    [1000,2000,3000,5000,8000].forEach(delay=>{
+      setTimeout(()=>{
+        const visible=panel&&panel.style.display==='flex'&&panel.parentNode;
+        if(!visible){
+          console.log('[GDI M22] retry após',delay,'ms — tentando abrir');
+          tryOpenCentralAndPrompt();
+        }else{
+          try{
+            if(window.location.search.includes('central=1')){
+              const newUrl=window.location.pathname+window.location.hash;
+              window.history.replaceState({},document.title,newUrl);
+              console.log('[GDI M22] URL limpa');
+            }
+          }catch(_){}
+        }
+      },delay);
+    });
   }
-  //gatilhos
+
+  function tryOpenCentralAndPrompt(retries){
+    retries=retries||0;
+    if(retries>30){console.warn('[GDI M22] desistindo após 30 tentativas');return;}
+    console.log('[GDI M22] tryOpenCentralAndPrompt tentativa',retries+1);
+    // Método 1: openPanel() (função local)
+    try{
+      openPanel('cursos');
+      console.log('[GDI M22] ★ openPanel() chamado | panel:',panel?'OK':'null','| display:',panel?panel.style.display:'N/A');
+    }catch(e){
+      console.warn('[GDI M22] erro em openPanel:',e.message,'— retry em 500ms');
+      setTimeout(()=>tryOpenCentralAndPrompt(retries+1),500);
+      return;
+    }
+    // Verifica visibilidade após 200ms
+    setTimeout(()=>{
+      const isVisible=panel&&panel.style.display==='flex'&&panel.parentNode&&panel.offsetHeight>0;
+      console.log('[GDI M22] panel visível?',isVisible,'| offsetHeight:',panel?panel.offsetHeight:0);
+      if(!isVisible){
+        console.warn('[GDI M22] panel não visível — tentando via navbar button');
+        const navBtn=document.querySelector('.gdi-central-nav-btn,#gdi-central-nav-btn,[data-central-btn],a[href*="central"],button[onclick*="openPanel"]');
+        if(navBtn){
+          console.log('[GDI M22] clicando navbar btn:',navBtn.tagName,navBtn.className||navBtn.id);
+          navBtn.click();
+        }else{
+          console.log('[GDI M22] navbar btn não encontrado — retry em 500ms');
+          setTimeout(()=>tryOpenCentralAndPrompt(retries+1),500);
+        }
+      }
+    },200);
+    // depois que a Central abriu, verifica cursos
+    setTimeout(()=>{
+      try{
+        const manual=lsGet('gdi-manual-courses-v1',[]);
+        const allCourses=collectCourses();
+        if(manual.length===0 && allCourses.length===0){
+          console.log('[GDI M22] primeiro login — auto-abrindo Add Course modal');
+          if(window.showToast)showToast('🐩 Bem-vindo! Adicione seus cursos para começar.');
+          setTimeout(()=>{
+            const body=panel&&panel.querySelector('#gdi-central-body');
+            if(body){showAddCourseModal(body);}
+          },800);
+        }else{
+          if(window.showToast)showToast('🐩 Bem-vindo de volta! Retomando...');
+          tryResumeBattalion();
+        }
+      }catch(e){console.warn('[GDI M22] erro:',e.message);}
+    },1000);
+  }
+
+  async function tryResumeBattalion(){
+    try{
+      const r=await fetch('/api/courses/list',{cache:'no-store'});
+      if(!r.ok){console.warn('[GDI M22] /api/courses/list HTTP',r.status);return;}
+      const d=await r.json();
+      if(!d||!d.ok||!Array.isArray(d.courses))return;
+      const pending=d.courses.filter(c=>c.materialsReady===false||!c.materialsReady);
+      if(pending.length===0){console.log('[GDI M22] todos cursos prontos');return;}
+      console.log('[GDI M22] retomando',pending.length,'curso(s)');
+      for(const c of pending){
+        try{
+          if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+            window.gdiIsaPdf.startBattalion(c.coursePath, c.coursePath, c.courseName||'curso', [])
+              .catch(e=>console.warn('[Battalion resume] falha:',e.message));
+          }
+        }catch(e){console.warn('[Battalion resume] erro:',e.message);}
+      }
+      if(window.showToast)showToast('⚡ Batalhão retomado para '+pending.length+' curso(s)');
+    }catch(e){console.warn('[GDI M22] erro:',e.message);}
+  }
+
+  // MÚLTIPLOS GATILHOS (defensivo)
   if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',()=>setTimeout(autoOpenCentralOnHomepage,800));
+    document.addEventListener('DOMContentLoaded',()=>setTimeout(bootstrapCentralOnLogin,800));
   }else{
-    setTimeout(autoOpenCentralOnHomepage,800);
+    setTimeout(bootstrapCentralOnLogin,800);
   }
-  if(window.Bus&&window.Bus.onGlobal){
-    window.Bus.onGlobal('page:change',()=>setTimeout(autoOpenCentralOnHomepage,500));
-    window.Bus.onGlobal('user:ready',()=>setTimeout(autoOpenCentralOnHomepage,300));
+  if(window.GDIUser && typeof window.GDIUser.ready==='function'){
+    window.GDIUser.ready().then(bootstrapCentralOnLogin).catch(()=>setTimeout(bootstrapCentralOnLogin,1500));
+  }else{
+    setTimeout(bootstrapCentralOnLogin,1500);
   }
-  // marca sessão ativa
+  if(window.Bus && window.Bus.onGlobal){
+    window.Bus.onGlobal('user:ready',()=>setTimeout(bootstrapCentralOnLogin,300));
+    window.Bus.onGlobal('page:change',()=>{
+      if(window.location.search.includes('central=1')){
+        console.log('[GDI M22] page:change + ?central=1 → re-tentando');
+        setTimeout(bootstrapCentralOnLogin,500);
+      }
+    });
+  }
+  const setupBootstrapObserver=()=>{
+    const navEl=document.querySelector('.gdi-nav')||document.getElementById('nav');
+    if(!navEl){setTimeout(setupBootstrapObserver,500);return;}
+    new MutationObserver(()=>{
+      if(window.location.search.includes('central=1')){
+        const visible=panel&&panel.style.display==='flex';
+        if(!visible){
+          console.log('[GDI M22] navbar mudou + ?central=1 → re-tentando');
+          bootstrapCentralOnLogin();
+        }
+      }
+    }).observe(navEl,{childList:true,subtree:true});
+  };
+  setupBootstrapObserver();
+
   try{localStorage.setItem('gdi-session-active','1');}catch(_){}
   window.addEventListener('beforeunload',()=>{try{localStorage.setItem('gdi-session-active','0');}catch(_){}});
+
 })();
 
 // ═══════════════════════════════════════════════════════════════
