@@ -2832,7 +2832,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
 /* ═══ CENTRAL DE ESTUDOS v3 — design moderno (sidebar + dashboard) ═══ */
 #gdi-central{display:none;flex-direction:column;width:100%;height:calc(100vh - 54px);background:var(--ferreto-bg,#070910);color:var(--ferreto-text,#f3f5fa);font-family:var(--ferreto-font-body,'Rubik',sans-serif);overflow:hidden;}
 @keyframes gdi-central-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
-.gdi-central-box{background:var(--ferreto-bg,#0f1218);border:0;border-radius:0;width:100%;max-width:none;max-height:100dvh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
+.gdi-central-box{display:flex;flex-direction:column;height:100%;background:var(--ferreto-bg,#070910);border-radius:0;overflow:hidden;}
 /* Header — minimalista, com stats rápidas */
 .gdi-central-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.05));flex-shrink:0;flex-wrap:nowrap;}
 .gdi-central-head-title{display:flex;align-items:center;gap:10px;flex-shrink:0;}
@@ -2848,7 +2848,7 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
 #gdi-central-x{margin-left:auto;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text-muted,#8b949e);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
 #gdi-central-x:hover{background:rgba(255,107,107,.15);color:#ff8b8b;border-color:rgba(255,107,107,.3);}
 /* Layout principal: sidebar + body */
-.gdi-central-main{flex:1;display:flex;overflow:hidden;}
+.gdi-central-main{display:flex;flex:1;min-height:0;overflow:hidden;}
 /* Sidebar */
 .gdi-central-sidebar{width:220px;flex-shrink:0;background:var(--ferreto-bg-2,#0d1119);border-right:1px solid var(--ferreto-border,#21262d);overflow-y:auto;padding:14px 10px;display:flex;flex-direction:column;gap:2px;}
 .gdi-central-sidebar::-webkit-scrollbar{width:6px;}
@@ -2931,6 +2931,11 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
 /* Z-index unificado para todos os modais */
 .gdi-modal-overlay{z-index:100000!important;}
 .gdi-fc{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:14px;padding:26px 20px;min-height:170px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;max-width:560px;margin:0 auto;}
+
+/* ★ FIX: esconder dropdown de drives do navbar (agora na barra inferior da Central) */
+.gdi-nav .dropdown, .navbar .dropdown, #nav .dropdown { display:none !important; }
+
+.gdi-drive-bar{display:flex;gap:6px;padding:10px 16px;background:var(--ferreto-surface-2,rgba(255,255,255,.045));border-top:2px solid var(--ferreto-border-strong,#30363d);overflow-x:auto;flex-shrink:0;z-index:10;}
 /* Responsive */
 @media(max-width:768px){
   .gdi-central-sidebar{width:60px;padding:10px 6px;}
@@ -3066,6 +3071,17 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
         files=await window.gdiListAllFiles(path, window.gdiGetPw?window.gdiGetPw():'');
         if(!Array.isArray(files))files=[];
       }
+      // ★ FIX: fallback de fetch direto se gdiListAllFiles retornar vazio
+      if(!files.length&&path!=='/'){
+        console.log('[DriveBar] gdiListAllFiles vazio — tentando fetch direto');
+        try{
+          const ctrl=new AbortController();
+          const to=setTimeout(()=>ctrl.abort(),15000);
+          const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:'',page_token:'',page_index:0}),signal:ctrl.signal});
+          clearTimeout(to);
+          if(r.ok){const d=await r.json();if(d&&d.data&&Array.isArray(d.data.files))files=d.data.files;console.log('[DriveBar] fetch direto OK:',files.length,'arquivos');}
+        }catch(e2){console.warn('[DriveBar] fetch direto falhou:',e2.message);}
+      }
     }catch(e){console.warn('[DriveBar] erro ao listar:',e.message);}
     loadingEl.style.display='none';
     // separa folders e arquivos
@@ -3080,7 +3096,8 @@ console.log('[GDI Study] ★ versão:',window.GDI_STUDY_VERSION);
     // pastas
     folders.slice(0,100).forEach(f=>{
       const fn=f.name||f.title||'pasta';
-      const target=path.endsWith('/')?path+encodeURIComponent(fn):path+'/'+encodeURIComponent(fn);
+      let target=path.endsWith('/')?path+encodeURIComponent(fn):path+'/'+encodeURIComponent(fn);
+      if(!target.endsWith('/'))target=target+'/';  // ★ FIX: trailing slash obrigatório para o worker
       const card=document.createElement('div');
       card.style.cssText='padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;transition:all .15s;';
       card.innerHTML='<div style="display:flex;align-items:center;gap:8px;">'+
