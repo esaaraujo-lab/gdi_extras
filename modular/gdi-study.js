@@ -1630,50 +1630,319 @@
   function showAddCourseModal(box){
     const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];
     const icons=['⚖️','📐','📚','🎯','🧮','📖','🔬','💼','🌍','🏛️','⚙️','🎵'];
-    const html=`<div style="display:flex;flex-direction:column;gap:14px;">
-      <div>
-        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome do curso *</label>
-        <input id="gdi-amc-name" placeholder="Ex: Direito Constitucional para Concurso" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
-      </div>
-      <div>
-        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
-        <div id="gdi-amc-icons" style="display:flex;gap:6px;flex-wrap:wrap;">
-          ${icons.map((ic,i)=>`<button class="gdi-amc-icon-btn" data-icon="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}
-        </div>
-      </div>
-      <div>
-        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
-        <div id="gdi-amc-colors" style="display:flex;gap:6px;flex-wrap:wrap;">
-          ${colors.map((c,i)=>`<button class="gdi-amc-color-btn" data-color="${c}" style="background:${c};border:2px solid transparent;border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}
-        </div>
-      </div>
-      <div>
-        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
-        <input id="gdi-amc-goal" type="number" min="10" max="480" value="60" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
-      </div>
-      <div>
-        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
-        <textarea id="gdi-amc-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;"></textarea>
-      </div>
-    </div>`;
-    // cria overlay custom (gdiModal só suporta 1 input, então fazemos manual)
+    // ★ NOVO: navegador de Drive interno (usa gdiListAllFiles do host)
+    // Permite navegar pelas pastas do Google Drive e selecionar a que o aluno quer
+    // como curso. Ao confirmar, dispara o Batalhão de IA em background.
     const overlay=document.createElement('div');
     overlay.className='gdi-modal-overlay';
     overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
-    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
-        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">+ Adicionar curso manual</b>
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);"><i class="bi bi-folder-plus"></i> Adicionar curso</b>
         <button id="gdi-amc-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
       </div>
-      <div style="padding:20px;">${html}</div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
+      <!-- Tabs: Navegar Drive | Manual -->
+      <div style="display:flex;gap:2px;padding:10px 20px 0;border-bottom:1px solid var(--ferreto-border,#21262d);">
+        <button id="tab-drive" class="gdi-amc-tab" style="flex:1;padding:8px;border:0;background:var(--ferreto-surface-3,rgba(255,255,255,.08));color:var(--ferreto-text,#f0f6fc);cursor:pointer;font-size:13px;border-radius:8px 8px 0 0;font-weight:600;border-bottom:2px solid var(--ferreto-primary,#ff8b9f);">📂 Navegar Drive</button>
+        <button id="tab-manual" class="gdi-amc-tab" style="flex:1;padding:8px;border:0;background:transparent;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:13px;border-radius:8px 8px 0 0;">✏️ Manual</button>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:16px 20px;">
+        <!-- Painel Drive -->
+        <div id="panel-drive">
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0 0 10px;line-height:1.5;">Navegue pelas pastas do Drive e clique em <b style="color:var(--ferreto-primary,#ff8b9f);">"Selecionar esta pasta"</b> para adicionar como curso. A Meggy vai ler os PDFs e vídeos automaticamente em background.</p>
+          <!-- Breadcrumb -->
+          <div id="gdi-amc-bc" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:8px 10px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;margin-bottom:10px;font-size:12px;"></div>
+          <!-- Loading -->
+          <div id="gdi-amc-loading" style="display:none;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><div class="gdi-spinner" style="margin:0 auto 10px;"></div>Carregando pastas...</div>
+          <!-- Lista de pastas -->
+          <div id="gdi-amc-folders" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:340px;overflow-y:auto;padding:4px;"></div>
+          <!-- Pasta atual info -->
+          <div id="gdi-amc-current-info" style="display:none;margin-top:14px;padding:12px;background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.04));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:10px;"></div>
+        </div>
+        <!-- Painel Manual (oculto por padrão) -->
+        <div id="panel-manual" style="display:none;flex-direction:column;gap:14px;">
+          <div>
+            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome do curso *</label>
+            <input id="gdi-amc-name" placeholder="Ex: Direito Constitucional para Concurso" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+          </div>
+          <div>
+            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+            <div id="gdi-amc-icons" style="display:flex;gap:6px;flex-wrap:wrap;">
+              ${icons.map((ic,i)=>`<button class="gdi-amc-icon-btn" data-icon="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}
+            </div>
+          </div>
+          <div>
+            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
+            <div id="gdi-amc-colors" style="display:flex;gap:6px;flex-wrap:wrap;">
+              ${colors.map((c,i)=>`<button class="gdi-amc-color-btn" data-color="${c}" style="background:${c};border:2px solid transparent;border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}
+            </div>
+          </div>
+          <div>
+            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
+            <input id="gdi-amc-goal" type="number" min="10" max="480" value="60" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+          </div>
+          <div>
+            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
+            <textarea id="gdi-amc-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;"></textarea>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;border-top:1px solid var(--ferreto-border,#21262d);padding-top:14px;">
         <button id="gdi-amc-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
-        <button id="gdi-amc-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">Salvar curso</button>
+        <button id="gdi-amc-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">📂 Selecionar esta pasta</button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
+
+    // ── Estado do navegador ──
     let selectedIcon=icons[0];
     let selectedColor=colors[0];
+    let currentMode='drive';  // 'drive' | 'manual'
+    let currentPath='/';      // path atual do navegador
+    let selectedPath=null;    // path selecionado pelo aluno
+    let selectedName=null;
+
+    // ── Tabs ──
+    const tabDrive=overlay.querySelector('#tab-drive');
+    const tabManual=overlay.querySelector('#tab-manual');
+    const panelDrive=overlay.querySelector('#panel-drive');
+    const panelManual=overlay.querySelector('#panel-manual');
+    const saveBtn=overlay.querySelector('#gdi-amc-save');
+    function setMode(m){
+      currentMode=m;
+      if(m==='drive'){
+        tabDrive.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';
+        tabDrive.style.color='var(--ferreto-text,#f0f6fc)';
+        tabDrive.style.borderBottom='2px solid var(--ferreto-primary,#ff8b9f)';
+        tabDrive.style.fontWeight='600';
+        tabManual.style.background='transparent';
+        tabManual.style.color='var(--ferreto-text-muted,#8b949e)';
+        tabManual.style.borderBottom='0';
+        tabManual.style.fontWeight='400';
+        panelDrive.style.display='block';
+        panelManual.style.display='none';
+        saveBtn.textContent='📂 Selecionar esta pasta';
+        if(selectedPath)saveBtn.textContent='✓ Adicionar "'+(selectedName||selectedPath).slice(0,30)+'"';
+        else saveBtn.textContent='📂 Selecionar esta pasta';
+      }else{
+        tabManual.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';
+        tabManual.style.color='var(--ferreto-text,#f0f6fc)';
+        tabManual.style.borderBottom='2px solid var(--ferreto-primary,#ff8b9f)';
+        tabManual.style.fontWeight='600';
+        tabDrive.style.background='transparent';
+        tabDrive.style.color='var(--ferreto-text-muted,#8b949e)';
+        tabDrive.style.borderBottom='0';
+        tabDrive.style.fontWeight='400';
+        panelDrive.style.display='none';
+        panelManual.style.display='flex';
+        saveBtn.textContent='💾 Salvar curso manual';
+      }
+    }
+    tabDrive.onclick=()=>setMode('drive');
+    tabManual.onclick=()=>setMode('manual');
+    setMode('drive');
+
+    // ── Navegador de Drive ──
+    const bcEl=overlay.querySelector('#gdi-amc-bc');
+    const foldersEl=overlay.querySelector('#gdi-amc-folders');
+    const loadingEl=overlay.querySelector('#gdi-amc-loading');
+    const currentInfoEl=overlay.querySelector('#gdi-amc-current-info');
+
+    function normPath(p){return p||'/';}
+    function pathSegments(p){
+      // /0:/Cursos/Direito/Constitucional → ['0:', 'Cursos', 'Direito', 'Constitucional']
+      return normPath(p).split('/').filter(Boolean);
+    }
+    function getDriveName(seg){
+      // seg = '0:' → retorna nome do drive
+      const m=seg.match(/^(\d+):$/);
+      if(m&&window.drive_names)return window.drive_names[+m[1]]||seg;
+      return seg;
+    }
+    function isFolder(file){
+      return file && (file.mimeType==='application/vnd.google-apps.folder' || file.type==='folder' || (file.dir===true) || (file.mimeType&&file.mimeType.includes('folder')));
+    }
+    function getFolderPath(file){
+      // Tenta file.path, file.id, file.parentPath, etc
+      if(file.path)return file.path;
+      if(file.parentPath&&file.name)return file.parentPath+'/'+encodeURIComponent(file.name);
+      if(file.fullPath)return file.fullPath;
+      return null;
+    }
+    function getFileName(file){return file.name||file.title||file.originalName||'pasta';}
+
+    function renderBreadcrumb(){
+      const segs=pathSegments(currentPath);
+      let html=`<span class="gdi-amc-bc-item" data-p="/" style="cursor:pointer;color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-house"></i> Home</span>`;
+      let acc='';
+      for(const s of segs){
+        acc+='/'+s;
+        const display=decodeURIComponent(getDriveName(s));
+        html+=`<span style="color:var(--ferreto-text-faint,#6b7488);">/</span><span class="gdi-amc-bc-item" data-p="${esc(acc)}" style="cursor:pointer;color:var(--ferreto-text,#e6edf3);">${esc(display)}</span>`;
+      }
+      bcEl.innerHTML=html;
+      bcEl.querySelectorAll('.gdi-amc-bc-item').forEach(el=>{
+        el.onclick=()=>navigate(el.dataset.p);
+      });
+    }
+
+    async function navigate(path){
+      currentPath=normPath(path);
+      renderBreadcrumb();
+      loadingEl.style.display='block';
+      foldersEl.innerHTML='';
+      currentInfoEl.style.display='none';
+      try{
+        if(!window.gdiListAllFiles){
+          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:20px;text-align:center;color:#ff8b8b;font-size:13px;">API de navegação não disponível. Use a aba Manual.</div>';
+          loadingEl.style.display='none';
+          return;
+        }
+        // gdiListAllFiles(path, pw, onPage) — retorna todos os files recursivamente
+        // Mas para o navegador, queremos só os folders FILHOS diretos
+        // Estratégia: chama gdiListAllFiles e filtra só folders não-recursivos
+        // (se houver muitos, mostra os primeiros 100)
+        const allFiles=[];
+        const pw=window.gdiGetPw?window.gdiGetPw():'';
+        // Flag para saber se já recebemos primeira página
+        let firstBatch=true;
+        await window.gdiListAllFiles(currentPath, pw, (filesSoFar)=>{
+          // page callback — não usamos incremental aqui
+        }).then(all=>{
+          if(!Array.isArray(all)){allFiles.length=0;return;}
+          allFiles.push(...all);
+        }).catch(e=>{console.warn('[AddCourse] gdiListAllFiles falhou:',e.message);});
+        // Filtra só folders, e dedup por path/name
+        const seen=new Set();
+        const folders=[];
+        const pdfs=[];
+        const videos=[];
+        for(const f of allFiles){
+          if(!f)continue;
+          if(isFolder(f)){
+            const fp=getFolderPath(f)||'';
+            const fn=getFileName(f);
+            const k=fp+'|'+fn;
+            if(seen.has(k))continue;
+            seen.add(k);
+            folders.push(f);
+          }else if(f.mimeType&&(f.mimeType.includes('pdf')||f.mimeType.includes('video'))){
+            pdfs.push(f);
+          }
+        }
+        loadingEl.style.display='none';
+        if(!folders.length){
+          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma subpasta aqui. Esta é uma pasta folha — você pode selecioná-la como curso.</div>';
+        }else{
+          foldersEl.innerHTML=folders.slice(0,100).map(f=>{
+            const fp=getFolderPath(f);
+            const fn=getFileName(f);
+            // path alvo: se temos folderPath, usa; senão monta com currentPath+'/'+name
+            const target=fp||(currentPath.endsWith('/')?currentPath+encodeURIComponent(fn):currentPath+'/'+encodeURIComponent(fn));
+            return `<div class="gdi-amc-folder-card" data-p="${esc(target)}" data-n="${esc(fn)}" style="padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;transition:all .15s;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-folder-fill" style="color:var(--ferreto-secondary,#5ddeda);font-size:18px;flex:none;"></i>
+                <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(fn)}</b>
+                <i class="bi bi-chevron-right" style="color:var(--ferreto-text-faint,#6b7488);font-size:12px;flex:none;"></i>
+              </div>
+            </div>`;
+          }).join('');
+          foldersEl.querySelectorAll('.gdi-amc-folder-card').forEach(card=>{
+            card.onmouseenter=()=>{card.style.borderColor='var(--ferreto-primary,#ff8b9f)';card.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';};
+            card.onmouseleave=()=>{card.style.borderColor='var(--ferreto-border,#30363d)';card.style.background='var(--ferreto-surface-2,rgba(255,255,255,.04))';};
+            card.onclick=()=>navigate(card.dataset.p);
+          });
+        }
+        // mostra info da pasta atual (PDFs/vídeos encontrados recursivamente)
+        const totalPdfs=pdfs.length;
+        const totalVideos=pdfs.filter(f=>f.mimeType&&f.mimeType.includes('video')).length;
+        const totalMaterias=pdfs.filter(f=>f.mimeType&&f.mimeType.includes('pdf')).length;
+        if(currentPath!=='/'){
+          const segs=pathSegments(currentPath);
+          const courseName=decodeURIComponent(getDriveName(segs[segs.length-1]));
+          selectedPath=currentPath;
+          selectedName=courseName;
+          currentInfoEl.style.display='block';
+          currentInfoEl.innerHTML=`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+            <div style="font-size:30px;flex:none;">📁</div>
+            <div style="flex:1;min-width:200px;">
+              <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${esc(courseName)}</b>
+              <div style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${totalMaterias} PDF(s) · ${totalVideos} vídeo(s) encontrados</div>
+              <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:2px;font-family:'JetBrains Mono',monospace;">${esc(currentPath)}</div>
+            </div>
+            <button id="gdi-amc-select-current" style="padding:8px 14px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:12px;">✓ Selecionar esta pasta</button>
+          </div>`;
+          currentInfoEl.querySelector('#gdi-amc-select-current').onclick=()=>doAddCourseFromDrive(currentPath, courseName, totalMaterias);
+          saveBtn.textContent='✓ Adicionar "'+courseName.slice(0,30)+'"';
+        }else{
+          selectedPath=null;
+          selectedName=null;
+          currentInfoEl.style.display='none';
+          saveBtn.textContent='📂 Selecione uma pasta primeiro';
+        }
+      }catch(e){
+        loadingEl.style.display='none';
+        foldersEl.innerHTML='<div style="grid-column:1/-1;padding:20px;text-align:center;color:#ff8b8b;font-size:13px;">Erro: '+esc(e.message)+'</div>';
+      }
+    }
+
+    // ── Adiciona curso a partir de pasta selecionada no Drive ──
+    async function doAddCourseFromDrive(coursePath, courseName, pdfCount){
+      const LS_MANUAL='gdi-manual-courses-v1';
+      const manual=lsGet(LS_MANUAL,[]);
+      // evita duplicar
+      if(manual.some(c=>c.path===coursePath)){
+        showToast('Curso "'+courseName+'" já está adicionado');
+        return;
+      }
+      const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+      manual.push({
+        id:courseId,name:courseName,icon:'📁',color:'#5ddeda',
+        goal:60,notes:'',createdAt:Date.now(),
+        manual:true,path:coursePath,courseKey:coursePath
+      });
+      lsSet(LS_MANUAL,manual);
+      const close=()=>overlay.remove();
+      close();
+      showToast('Curso "'+courseName+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
+      renderCursos(box);
+      // ★ BATALHÃO: dispara processamento em background
+      try{
+        const pdfs=[];
+        if(window.gdiListAllFiles){
+          try{
+            const files=await window.gdiListAllFiles(coursePath,window.gdiGetPw?window.gdiGetPw():'');
+            if(Array.isArray(files)){
+              for(const f of files){
+                if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
+                  pdfs.push({name:f.name, url:f.path||f.url, text:''});
+                }
+              }
+            }
+          }catch(_){}
+        }
+        if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+          // extrai texto de até 5 PDFs em paralelo
+          if(pdfs.length && window.gdiIsaPdf.extractPdfText){
+            const PARALLEL=5;
+            for(let i=0;i<pdfs.length;i+=PARALLEL){
+              const chunk=pdfs.slice(i,i+PARALLEL);
+              await Promise.allSettled(chunk.map(async p=>{
+                try{
+                  if(p.url){
+                    const txt=await window.gdiIsaPdf.extractPdfText(p.url);
+                    p.text=txt.slice(0,15000);
+                  }
+                }catch(_){}
+              }));
+            }
+          }
+          await window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, pdfs);
+        }
+      }catch(e){console.warn('[Batalhão] falha:',e.message);}
+    }
+
+    // ── Painel Manual (ícones + cores) ──
     overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(b=>{
       b.onclick=()=>{
         overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
@@ -1688,77 +1957,104 @@
         selectedColor=b.dataset.color;
       };
     });
-    // default selection
     const firstIcon=overlay.querySelector('.gdi-amc-icon-btn');
     if(firstIcon)firstIcon.style.borderColor='var(--ferreto-primary,#ff8b9f)';
     const firstColor=overlay.querySelector('.gdi-amc-color-btn');
     if(firstColor)firstColor.style.borderWidth='4px';
+
+    // ── Close handlers ──
     const close=()=>overlay.remove();
     overlay.querySelector('#gdi-amc-x').onclick=close;
     overlay.querySelector('#gdi-amc-cancel').onclick=close;
     overlay.onclick=(e)=>{if(e.target===overlay)close();};
-    overlay.querySelector('#gdi-amc-save').onclick=async ()=>{
-      const name=overlay.querySelector('#gdi-amc-name').value.trim();
-      if(!name){showToast('Digite o nome do curso');return;}
-      const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
-      const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
-      // salvar curso manual
-      const LS_MANUAL='gdi-manual-courses-v1';
-      const manual=lsGet(LS_MANUAL,[]);
-      const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
-      manual.push({
-        id:courseId,name,icon:selectedIcon,color:selectedColor,
-        goal,notes,createdAt:Date.now(),
-        manual:true
-      });
-      lsSet(LS_MANUAL,manual);
-      close();
-      showToast('Curso "'+name+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
-      renderCursos(box);
-      // ★ BATALHÃO: dispara processamento em background para gerar resumos+questões+flashcards
-      // de TODAS as aulas/PDFs do curso. Resultados ficam no cache ISA compartilhado,
-      // beneficiando futuros alunos que adicionarem o mesmo curso.
-      try{
-        // descobre PDFs do curso via gdiListAllFiles (host API)
-        const coursePath='/0:/'+name;
-        const courseKey=coursePath;
-        const pdfs=[];
-        if(window.gdiListAllFiles){
-          try{
-            const files=await window.gdiListAllFiles(coursePath,'');
-            if(Array.isArray(files)){
-              for(const f of files){
-                if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
-                  pdfs.push({name:f.name, url:f.path||f.url, text:''});
+
+    // ── Save handler (decide modo) ──
+    saveBtn.onclick=async ()=>{
+      if(currentMode==='drive'){
+        if(!selectedPath||!selectedName){showToast('Navegue até uma pasta e clique em "Selecionar esta pasta"');return;}
+        await doAddCourseFromDrive(selectedPath, selectedName, 0);
+      }else{
+        // modo manual
+        const name=overlay.querySelector('#gdi-amc-name').value.trim();
+        if(!name){showToast('Digite o nome do curso');return;}
+        const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
+        const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
+        const LS_MANUAL='gdi-manual-courses-v1';
+        const manual=lsGet(LS_MANUAL,[]);
+        const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+        const coursePath='/0:/'+encodeURIComponent(name);
+        manual.push({
+          id:courseId,name,icon:selectedIcon,color:selectedColor,
+          goal,notes,createdAt:Date.now(),
+          manual:true,path:coursePath,courseKey:coursePath
+        });
+        lsSet(LS_MANUAL,manual);
+        close();
+        showToast('Curso "'+name+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
+        renderCursos(box);
+        // ★ BATALHÃO para manual: tenta adivinhar path do drive
+        try{
+          const pdfs=[];
+          if(window.gdiListAllFiles){
+            try{
+              const files=await window.gdiListAllFiles(coursePath,'');
+              if(Array.isArray(files)){
+                for(const f of files){
+                  if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
+                    pdfs.push({name:f.name, url:f.path||f.url, text:''});
+                  }
                 }
               }
-            }
-          }catch(_){}
-        }
-        // dispara batalhão (mesmo sem PDFs — o worker ainda pode buscar)
-        if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
-          // se há PDFs, extrai texto de cada um (front) para acelerar o batalhão
-          if(pdfs.length && window.gdiIsaPdf.extractPdfText){
-            // paralelo: extrai texto de até 5 PDFs simultaneamente
-            const PARALLEL=5;
-            for(let i=0;i<pdfs.length;i+=PARALLEL){
-              const chunk=pdfs.slice(i,i+PARALLEL);
-              await Promise.allSettled(chunk.map(async p=>{
-                try{
-                  if(p.url){
-                    const txt=await window.gdiIsaPdf.extractPdfText(p.url);
-                    p.text=txt.slice(0,15000);
-                  }
-                }catch(_){}
-              }));
-            }
+            }catch(_){}
           }
-          // dispara!
-          await window.gdiIsaPdf.startBattalion(courseKey, coursePath, name, pdfs);
-        }
-      }catch(e){console.warn('[Batalhão] falha:',e.message);}
+          if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+            if(pdfs.length && window.gdiIsaPdf.extractPdfText){
+              const PARALLEL=5;
+              for(let i=0;i<pdfs.length;i+=PARALLEL){
+                const chunk=pdfs.slice(i,i+PARALLEL);
+                await Promise.allSettled(chunk.map(async p=>{
+                  try{
+                    if(p.url){
+                      const txt=await window.gdiIsaPdf.extractPdfText(p.url);
+                      p.text=txt.slice(0,15000);
+                    }
+                  }catch(_){}
+                }));
+              }
+            }
+            await window.gdiIsaPdf.startBattalion(coursePath, coursePath, name, pdfs);
+          }
+        }catch(e){console.warn('[Batalhão] falha:',e.message);}
+      }
     };
-    setTimeout(()=>overlay.querySelector('#gdi-amc-name').focus(),50);
+
+    // ── Inicia navegação na raiz ──
+    // Mostra lista de drives disponíveis (0:, 1:, etc) como folders
+    setTimeout(()=>{
+      // se currentPath é '/', mostra os drives como folders
+      if(window.drive_names && window.drive_names.length){
+        // monta uma pasta virtual para cada drive
+        bcEl.innerHTML=`<span class="gdi-amc-bc-item" data-p="/" style="cursor:pointer;color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-house"></i> Home</span>`;
+        foldersEl.innerHTML='';
+        loadingEl.style.display='none';
+        window.drive_names.forEach((dn,i)=>{
+          const card=document.createElement('div');
+          card.className='gdi-amc-folder-card';
+          card.dataset.p='/'+i+':';
+          card.dataset.n=dn;
+          card.style.cssText='padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;transition:all .15s;';
+          card.innerHTML=`<div style="display:flex;align-items:center;gap:8px;"><i class="bi bi-hdd-stack-fill" style="color:var(--ferreto-primary,#ff8b9f);font-size:18px;flex:none;"></i><b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">${esc(dn)}</b><i class="bi bi-chevron-right" style="color:var(--ferreto-text-faint,#6b7488);font-size:12px;flex:none;margin-left:auto;"></i></div>`;
+          card.onmouseenter=()=>{card.style.borderColor='var(--ferreto-primary,#ff8b9f)';card.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';};
+          card.onmouseleave=()=>{card.style.borderColor='var(--ferreto-border,#30363d)';card.style.background='var(--ferreto-surface-2,rgba(255,255,255,.04))';};
+          card.onclick=()=>navigate('/'+i+':');
+          foldersEl.appendChild(card);
+        });
+        currentInfoEl.style.display='none';
+      }else{
+        // fallback: tenta navegar direto de /0:/
+        navigate('/0:/');
+      }
+    },50);
   }
 
   // ★ Modal de cursos ocultos
