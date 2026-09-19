@@ -1330,57 +1330,53 @@
       return;
     }
     const trails=window.gdiTrails.get();
+    // ★ pega cursos do aluno para vincular
+    const courses=collectCourses();
+    const subjects=window.gdiSubjects?window.gdiSubjects.get():[];
     box.innerHTML=`<div style="max-width:760px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
         <div>
-          <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;">Trilhas de Estudo</b>
-          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Agrupe cursos e matérias em uma meta. Ex: "Auditor Fiscal" = Direito Tributário + Contabilidade + Português.</p>
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;">Trilhas</b>
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Crie trilhas conectando seus cursos e matérias. As trilhas organizam o cronograma de estudos.</p>
         </div>
         <button id="gdi-trail-add" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Nova trilha</button>
       </div>
-      <div id="gdi-trail-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+      <div id="gdi-trail-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;"></div>
     </div>`;
     const list=box.querySelector('#gdi-trail-list');
+    
     function drawList(){
       const all=window.gdiTrails.get();
       if(!all.length){
-        list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-signpost-2" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma trilha criada.<br><span style="font-size:12px;">Clique em "Nova trilha" para organizar seus cursos em uma meta.</span></div>';
+        list.innerHTML='<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--ferreto-text-muted,#8b949e);"><i class="bi bi-signpost-2" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma trilha criada.<br><span style="font-size:12px;">Clique em "Nova trilha" para conectar cursos e matérias.</span></div>';
         return;
       }
       list.innerHTML='';
       all.forEach(t=>{
-        const total=t.courses?t.courses.length:0;
+        // conta quantos cursos da trilha existem nos cursos do aluno
+        const linkedCourses=(t.courses||[]).filter(c=>courses.some(co=>co.key===c||co.manualCourse&&co.manualCourse.path===c));
+        const linkedSubjects=(t.subjects||[]).filter(s=>subjects.some(su=>su.name===s));
         const el=document.createElement('div');
-        el.className='gdi-note';
-        el.style.cssText='display:flex;align-items:center;gap:12px;padding:14px;cursor:pointer;';
-        el.innerHTML=`
-          <span style="font-size:28px;flex:none;">${t.icon||'🎯'}</span>
-          <div style="flex:1;min-width:0;">
-            <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${escHtml(t.name)}</b>
-            ${t.description?`<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">${escHtml(t.description)}</small>`:''}
-            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${total} curso${total!==1?'s':''} · meta: ${t.goal||'—'} dias</small>
-          </div>
-          <button class="gdi-mode-btn gdi-trail-edit" data-id="${escHtml(t.id)}" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>
-          <button class="gdi-mode-btn gdi-trail-del" data-id="${escHtml(t.id)}" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>
-        `;
+        el.className='gdi-course';
+        el.style.cssText='padding:14px 16px;cursor:pointer;border-left:4px solid '+(t.color||'#ff8b9f')+';';
+        el.innerHTML='<div style="display:flex;align-items:center;gap:12px;">'+
+          '<span style="font-size:24px;flex:none;">'+(t.icon||'🎯')+'</span>'+
+          '<div style="flex:1;min-width:0;">'+
+            '<b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">'+escHtml(t.name)+'</b>'+
+            (t.notes?'<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">'+escHtml(t.notes)+'</small>':'')+
+            '<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">'+(t.courses||[]).length+' curso(s) · '+linkedSubjects.length+' matéria(s) vinculada(s)</small>'+
+          '</div>'+
+          '<button class="gdi-mode-btn gdi-trail-edit" data-id="'+escHtml(t.id)+'" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>'+
+          '<button class="gdi-mode-btn gdi-trail-del" data-id="'+escHtml(t.id)+'" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>'+
+        '</div>';
         list.appendChild(el);
       });
-      list.querySelectorAll('.gdi-trail-edit').forEach(b=>b.onclick=()=>editTrail(b.dataset.id,box,drawList));
-      list.querySelectorAll('.gdi-trail-del').forEach(b=>b.onclick=async ()=>{
-        const tr=window.gdiTrails.get().find(x=>x.id===b.dataset.id);
+      list.querySelectorAll('.gdi-trail-edit').forEach(b=>b.onclick=()=>editTrail(b.dataset.id,box));
+      list.querySelectorAll('.gdi-trail-del').forEach(b=>b.onclick=async()=>{
+        const tr=all.find(x=>x.id===b.dataset.id);
         if(!tr)return;
-        const ok=await window.gdiModal({
-          title:'Excluir trilha',
-          message:'Excluir "'+tr.name+'"? Os cursos vinculados NÃO serão excluídos.',
-          confirmText:'Excluir',
-          cancelText:'Cancelar',
-          danger:true
-        });
-        if(ok){
-          window.gdiTrails.delete(b.dataset.id);
-          showToast('Trilha excluída');
-          drawList();
-        }
+        const ok=await window.gdiModal({title:'Excluir trilha',message:'Excluir "'+tr.name+'"?',confirmText:'Excluir',cancelText:'Cancelar',danger:true});
+        if(ok){window.gdiTrails.delete(b.dataset.id);showToast('Trilha excluída');drawList();}
       });
     }
     drawList();
@@ -1493,20 +1489,22 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
         <div>
           <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;">Matérias</b>
-          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Crie matérias para organizar seus flashcards. Ex: "Direito Constitucional", "Português", "Raciocínio Lógico".</p>
+          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:4px 0 0;">Adicione matérias (disciplinas avulsas) navegando pelo Drive. Cada matéria pode ser vinculada a cursos e trilhas.</p>
         </div>
-        <button id="gdi-subj-add" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-plus-lg"></i> Nova matéria</button>
+        <button id="gdi-subj-add" class="gdi-btn gdi-btn-primary" style="font-size:12px;"><i class="bi bi-folder-plus"></i> Adicionar matéria do Drive</button>
       </div>
-      <div id="gdi-subj-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <div id="gdi-subj-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;"></div>
     </div>`;
     const list=box.querySelector('#gdi-subj-list');
+    const addButton=box.querySelector('#gdi-subj-add');
+    
     function drawList(){
       const all=window.gdiSubjects.get();
       if(!all.length){
-        list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-journal-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma matéria criada ainda.<br><span style="font-size:12px;">Clique em "Nova matéria" para começar.</span></div>';
+        list.innerHTML='<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--ferreto-text-muted,#8b949e);"><i class="bi bi-journal-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma matéria adicionada ainda.<br><span style="font-size:12px;">Clique em "Adicionar matéria do Drive" para navegar e selecionar uma pasta.</span></div>';
         return;
       }
-      // contar cards por matéria (★ FIX: cards usam .path, não .subject)
+      // contar cards por matéria
       const cards=lsGet('gdi-cards-v1',[]);
       const countByName={};
       cards.forEach(c=>{
@@ -1517,40 +1515,205 @@
       all.forEach(s=>{
         const count=countByName[s.name]||0;
         const el=document.createElement('div');
-        el.className='gdi-note';
-        el.style.cssText='display:flex;align-items:center;gap:12px;padding:12px 14px;';
-        el.innerHTML=`
-          <span style="font-size:24px;flex:none;">${s.icon||'📚'}</span>
-          <div style="flex:1;min-width:0;">
-            <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;display:flex;align-items:center;gap:6px;">${escHtml(s.name)}<span style="width:8px;height:8px;border-radius:50%;background:${s.color||'#ff8b9f'};display:inline-block;"></span></b>
-            ${s.notes?`<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">${escHtml(s.notes)}</small>`:''}
-            <small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${count} card${count!==1?'s':''} · meta: ${s.goal||60} min/dia</small>
-          </div>
-          <button class="gdi-mode-btn gdi-subj-edit" data-id="${escHtml(s.id)}" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>
-          <button class="gdi-mode-btn gdi-subj-del" data-id="${escHtml(s.id)}" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>
-        `;
+        el.className='gdi-course';
+        el.style.cssText='padding:14px 16px;cursor:pointer;border-left:4px solid '+(s.color||'#ff8b9f')+';';
+        el.innerHTML='<div style="display:flex;align-items:center;gap:12px;">'+
+          '<span style="font-size:24px;flex:none;">'+(s.icon||'📚')+'</span>'+
+          '<div style="flex:1;min-width:0;">'+
+            '<b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">'+escHtml(s.name)+'</b>'+
+            (s.notes?'<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin-top:2px;">'+escHtml(s.notes)+'</small>':'')+
+            '<small style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">'+count+' card'+(count!==1?'s':'')+' · meta: '+(s.goal||60)+' min/dia</small>'+
+          '</div>'+
+          '<button class="gdi-mode-btn gdi-subj-edit" data-id="'+escHtml(s.id)+'" style="font-size:11px;padding:5px 10px;"><i class="bi bi-pencil"></i></button>'+
+          '<button class="gdi-mode-btn gdi-subj-del" data-id="'+escHtml(s.id)+'" style="font-size:11px;padding:5px 10px;color:#ff8b8b;"><i class="bi bi-trash"></i></button>'+
+        '</div>';
         list.appendChild(el);
       });
       list.querySelectorAll('.gdi-subj-edit').forEach(b=>b.onclick=()=>editSubject(b.dataset.id,box));
-      list.querySelectorAll('.gdi-subj-del').forEach(b=>b.onclick=async ()=>{
+      list.querySelectorAll('.gdi-subj-del').forEach(b=>b.onclick=async()=>{
         const sub=all.find(x=>x.id===b.dataset.id);
         if(!sub)return;
-        const ok=await window.gdiModal({
-          title:'Excluir matéria',
-          message:'Excluir "'+sub.name+'"? Os flashcards vinculados NÃO serão excluídos — apenas a matéria some da lista.',
-          confirmText:'Excluir',
-          cancelText:'Cancelar',
-          danger:true
-        });
-        if(ok){
-          window.gdiSubjects.delete(b.dataset.id);
-          showToast('Matéria excluída');
-          drawList();
-        }
+        const ok=await window.gdiModal({title:'Excluir matéria',message:'Excluir "'+sub.name+'"?',confirmText:'Excluir',cancelText:'Cancelar',danger:true});
+        if(ok){window.gdiSubjects.delete(b.dataset.id);showToast('Matéria excluída');drawList();}
       });
     }
+    
+    // ★ Botão "Adicionar matéria do Drive" — abre navegador de pastas
+    addButton.onclick=()=>{
+      // reutiliza o modal do showAddCourseModal mas com modo "matéria"
+      showSubjectDriveModal(box, drawList);
+    };
+    
     drawList();
-    box.querySelector('#gdi-subj-add').onclick=()=>editSubject(null,box,drawList);
+    box.querySelector('#gdi-subj-add').onclick=()=>{
+      showSubjectDriveModal(box, drawList);
+    };
+  }
+  
+  // ★ Modal de navegação de Drive para adicionar matéria isolada
+  function showSubjectDriveModal(box, afterAdd){
+    const overlay=document.createElement('div');
+    overlay.className='gdi-modal-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML='<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6);">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);">'+
+        '<b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,Poppins,sans-serif);"><i class="bi bi-folder-plus"></i> Adicionar matéria do Drive</b>'+
+        '<button id="gdi-sdm-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>'+
+      '</div>'+
+      '<div style="flex:1;overflow-y:auto;padding:16px 20px;">'+
+        '<p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0 0 10px;line-height:1.5;">Navegue pelo Drive e selecione uma pasta para adicioná-la como matéria isolada.</p>'+
+        '<div id="gdi-sdm-bc" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:8px 10px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;margin-bottom:10px;font-size:12px;"></div>'+
+        '<div id="gdi-sdm-loading" style="display:none;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);"><div class="gdi-spinner" style="margin:0 auto 10px;"></div>Carregando...</div>'+
+        '<div id="gdi-sdm-folders" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;"></div>'+
+        '<div id="gdi-sdm-current-info" style="display:none;margin-top:14px;padding:12px;background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.04));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:10px;"></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;border-top:1px solid var(--ferreto-border,#21262d);padding-top:14px;">'+
+        '<button id="gdi-sdm-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>'+
+        '<button id="gdi-sdm-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">✓ Adicionar matéria</button>'+
+      '</div>'+
+    '</div>';
+    document.body.appendChild(overlay);
+    
+    let selectedPath=null, selectedName=null;
+    let currentPath='/';
+    
+    const bcEl=overlay.querySelector('#gdi-sdm-bc');
+    const foldersEl=overlay.querySelector('#gdi-sdm-folders');
+    const loadingEl=overlay.querySelector('#gdi-sdm-loading');
+    const currentInfoEl=overlay.querySelector('#gdi-sdm-current-info');
+    const saveBtn=overlay.querySelector('#gdi-sdm-save');
+    
+    const close=()=>overlay.remove();
+    overlay.querySelector('#gdi-sdm-x').onclick=close;
+    overlay.querySelector('#gdi-sdm-cancel').onclick=close;
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    
+    // ★ Event delegation no overlay (capture phase) para botão "Adicionar matéria"
+    overlay.addEventListener('click',async(e)=>{
+      const btn=e.target.closest&&e.target.closest('#gdi-sdm-save');
+      if(!btn)return;
+      e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+      if(!selectedPath){showToast('Navegue até uma pasta primeiro');return;}
+      // ★ adiciona como matéria isolada
+      if(window.gdiSubjects){
+        const subs=window.gdiSubjects.get();
+        if(subs.some(s=>s.name===selectedName)){showToast('Matéria "'+selectedName+'" já existe');return;}
+        window.gdiSubjects.save({
+          id:'subj-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
+          name:selectedName,icon:'📁',color:'#5ddeda',goal:60,notes:'',
+          drivePath:selectedPath
+        });
+        close();
+        showToast('Matéria "'+selectedName+'" adicionada!');
+        if(afterAdd)afterAdd();
+      }
+    },true);
+    
+    // navegador de Drive (igal ao showAddCourseModal)
+    function navigate(path){
+      currentPath=path;
+      loadingEl.style.display='block';
+      foldersEl.innerHTML='';
+      currentInfoEl.style.display='none';
+      
+      if(path==='/'&&window.drive_names&&window.drive_names.length){
+        bcEl.innerHTML='<span style="cursor:pointer;color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-house"></i> Home</span>';
+        foldersEl.innerHTML='';
+        loadingEl.style.display='none';
+        window.drive_names.forEach((dn,i)=>{
+          const card=document.createElement('div');
+          card.style.cssText='padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;';
+          card.innerHTML='<i class="bi bi-hdd-stack-fill" style="color:var(--ferreto-primary,#ff8b9f);font-size:18px;"></i> <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">'+escHtml(dn)+'</b>';
+          card.onclick=()=>navigate('/'+i+':/');
+          foldersEl.appendChild(card);
+        });
+        return;
+      }
+      
+      const segs=path.split('/').filter(Boolean);
+      let bc='<span style="cursor:pointer;color:var(--ferreto-secondary,#5ddeda);" data-p="/"><i class="bi bi-house"></i> Home</span>';
+      let acc='';
+      for(const s of segs){
+        acc+='/'+s;
+        const disp=decodeURIComponent(s);
+        bc+='<span style="color:var(--ferreto-text-faint,#6b7488);">/</span><span style="cursor:pointer;color:var(--ferreto-text,#e6edf3);" data-p="'+acc+'/">'+disp.slice(0,20)+'</span>';
+      }
+      bcEl.innerHTML=bc;
+      bcEl.querySelectorAll('[data-p]').forEach(el=>el.onclick=()=>navigate(el.dataset.p));
+      
+      (async()=>{
+        let files=[];
+        if(window.gdiListAllFiles){
+          try{files=await window.gdiListAllFiles(currentPath,window.gdiGetPw?window.gdiGetPw():'');if(!Array.isArray(files))files=[];}catch(_){}
+        }
+        if(!files.length&&currentPath!=='/'){
+          try{
+            const r=await fetch(currentPath,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:'',page_token:'',page_index:0})});
+            if(r.ok){const d=await r.json();if(d&&d.data&&Array.isArray(d.data.files))files=d.data.files;}
+          }catch(_){}
+        }
+        loadingEl.style.display='none';
+        const folders=files.filter(f=>f&&(f.mimeType==='application/vnd.google-apps.folder'||(f.mimeType&&f.mimeType.includes('folder'))));
+        if(!folders.length){
+          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;">Nenhuma subpasta. Selecione esta pasta como matéria.</div>';
+        }else{
+          foldersEl.innerHTML=folders.slice(0,100).map(f=>{
+            const fn=f.name||'pasta';
+            let target=currentPath.endsWith('/')?currentPath+encodeURIComponent(fn):currentPath+'/'+encodeURIComponent(fn);
+            if(!target.endsWith('/'))target+='/';
+            return '<div class="gdi-sdm-folder-card" data-p="'+escHtml(target)+'" data-n="'+escHtml(fn)+'" style="padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;"><i class="bi bi-folder-fill" style="color:var(--ferreto-secondary,#5ddeda);font-size:18px;"></i> <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">'+escHtml(fn)+'</b> <i class="bi bi-chevron-right" style="color:var(--ferreto-text-faint,#6b7488);font-size:12px;float:right;"></i></div>';
+          }).join('');
+          foldersEl.querySelectorAll('.gdi-sdm-folder-card').forEach(card=>{
+            card.onmouseenter=()=>{card.style.borderColor='var(--ferreto-primary,#ff8b9f)';};
+            card.onmouseleave=()=>{card.style.borderColor='var(--ferreto-border,#30363d)';};
+            card.onclick=()=>navigate(card.dataset.p);
+          });
+        }
+        if(currentPath!=='/'){
+          const courseName=decodeURIComponent(segs[segs.length-1]);
+          selectedPath=currentPath;
+          selectedName=courseName;
+          currentInfoEl.style.display='block';
+          currentInfoEl.innerHTML='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;"><div style="font-size:30px;flex:none;">📁</div><div style="flex:1;min-width:200px;"><b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">'+escHtml(courseName)+'</b><div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:2px;font-family:monospace;word-break:break-all;">'+escHtml(currentPath)+'</div></div><button id="gdi-sdm-select-current" type="button" onclick="window.__gdiAddSubjectFromButton(this)" data-path="'+escHtml(currentPath)+'" data-name="'+escHtml(courseName)+'" style="padding:10px 18px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:13px;flex:none;">✓ Adicionar matéria</button></div>';
+        }else{
+          selectedPath=null;selectedName=null;
+          currentInfoEl.style.display='none';
+          saveBtn.textContent='📂 Selecione uma pasta';
+        }
+      })();
+    }
+    
+    // handler global para o botão inline
+    window.__gdiAddSubjectFromButton=async function(btn){
+      if(!btn)return;
+      const p=btn.dataset.path||'';
+      const n=btn.dataset.name||'Pasta';
+      if(!p){showToast('Erro: pasta não selecionada');return;}
+      if(window.gdiSubjects){
+        const subs=window.gdiSubjects.get();
+        if(subs.some(s=>s.name===n)){showToast('Matéria "'+n+'" já existe');return;}
+        window.gdiSubjects.save({id:'subj-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),name:n,icon:'📁',color:'#5ddeda',goal:60,notes:'',drivePath:p});
+        close();
+        showToast('Matéria "'+n+'" adicionada!');
+        if(afterAdd)afterAdd();
+      }
+    };
+    
+    // inicia na raiz (mostra drives)
+    setTimeout(()=>{
+      if(window.drive_names&&window.drive_names.length){
+        bcEl.innerHTML='<span style="cursor:pointer;color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-house"></i> Home</span>';
+        window.drive_names.forEach((dn,i)=>{
+          const card=document.createElement('div');
+          card.style.cssText='padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;';
+          card.innerHTML='<i class="bi bi-hdd-stack-fill" style="color:var(--ferreto-primary,#ff8b9f);font-size:18px;"></i> <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">'+escHtml(dn)+'</b>';
+          card.onclick=()=>navigate('/'+i+':/');
+          foldersEl.appendChild(card);
+        });
+      }else{
+        navigate('/0:/');
+      }
+    },50);
   }
   function editSubject(id,box,afterSave){
     const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];

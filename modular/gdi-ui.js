@@ -370,7 +370,7 @@ body.gdi-fv .plyr:-webkit-full-screen {
     const flashEl=document.createElement('div');flashEl.id='gdi-pom-flash';
     GDI_ROOT().appendChild(flashEl);
 
-    // ★ Pomodoro agora é botão na navbar (como Central de Estudos)
+    // ★ Pomodoro agora é botão na navbar (como Área do Aluno)
     function injectPomNav(){
       const oldFab=document.getElementById('gdi-pom-root');
       if(oldFab)oldFab.remove();
@@ -409,7 +409,7 @@ body.gdi-fv .plyr:-webkit-full-screen {
       else actions.appendChild(wrap);
       return true;
     }
-    // tenta injetar com retries (igual Central de Estudos)
+    // tenta injetar com retries (igual Área do Aluno)
     injectPomNav();
     for(let i=1;i<=10;i++)setTimeout(injectPomNav,i*300);
     Bus.onGlobal('page:change',()=>setTimeout(injectPomNav,100));
