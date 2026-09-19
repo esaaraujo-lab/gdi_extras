@@ -39,25 +39,62 @@ body.gdi-fv .gdi-player-wrap iframe{
   width:100%!important;max-width:100%!important;max-height:none!important;
   margin-left:auto!important;margin-right:auto!important;display:block!important;}
 
-/* ═══ FIX: Player em tela cheia sem barras pretas ═══ */
-/* Corrige o bug onde o video em fullscreen ficava deslocado para cima
-   e centralizado, deixando barras pretas embaixo e nas laterais.
-   Causa: .gdi-player-wrap video { max-height:78vh } do app.min.js
-   continuava ativo em :fullscreen. */
-.gdi-player-wrap:fullscreen,
-.gdi-player-wrap:-webkit-full-screen,
-.gdi-player-wrap:-moz-full-screen,
-.gdi-player-wrap:-ms-fullscreen {
+/* ═══ FIX v2: Player em tela cheia sem barras pretas ═══ */
+/* ★ FIX v2: agora também pega quando o ELEMENTO que entra em fullscreen
+   é o .plyr, #player, video, etc (não só .gdi-player-wrap) */
+
+/* Qualquer elemento em fullscreen deve preencher 100% da tela */
+:fullscreen, :-webkit-full-screen, :-moz-full-screen, :-ms-fullscreen {
   width:100vw!important; height:100vh!important; max-width:none!important;
   max-height:none!important; background:#000!important;
   border-radius:0!important; border:0!important; box-shadow:none!important;
-  display:flex!important; align-items:center!important; justify-content:center!important;
   padding:0!important; margin:0!important; overflow:hidden!important;
 }
+:fullscreen::backdrop, :-webkit-full-screen::backdrop { background:#000!important; }
+
+/* O elemento que está em fullscreen deve ser flex */
+.plyr:fullscreen, .plyr:-webkit-full-screen,
+video:fullscreen, video:-webkit-full-screen,
+#player:fullscreen, #player:-webkit-full-screen,
+#vplayer:fullscreen, #vplayer:-webkit-full-screen,
+.video-js:fullscreen, .video-js:-webkit-full-screen,
+.jwplayer:fullscreen, .jwplayer:-webkit-full-screen,
+.dplayer:fullscreen, .dplayer:-webkit-full-screen,
+.gdi-player-wrap:fullscreen, .gdi-player-wrap:-webkit-full-screen {
+  width:100vw!important; height:100vh!important; max-width:none!important;
+  max-height:none!important; background:#000!important;
+  display:flex!important; align-items:center!important; justify-content:center!important;
+  padding:0!important; margin:0!important; overflow:hidden!important;
+  border:0!important; border-radius:0!important;
+}
+
+/* O vídeo em si deve preencher o container fullscreen */
+:fullscreen video, :-webkit-full-screen video,
+:fullscreen .plyr__video-wrapper video, :-webkit-full-screen .plyr__video-wrapper video,
+:fullscreen .dplayer-video, :-webkit-full-screen .dplayer-video,
 .gdi-player-wrap:fullscreen video,
-.gdi-player-wrap:-webkit-full-screen video,
-.gdi-player-wrap:-moz-full-screen video,
-.gdi-player-wrap:-ms-fullscreen video,
+.gdi-player-wrap:-webkit-full-screen video {
+  width:100%!important; height:100%!important;
+  max-width:100vw!important; max-height:100vh!important;
+  object-fit:contain!important;
+  margin:0!important; padding:0!important;
+  display:block!important; background:#000!important;
+  border:0!important; border-radius:0!important;
+  position:relative!important; top:0!important; left:0!important;
+  transform:none!important;
+}
+
+/* Plyr wrapper deve preencher o fullscreen */
+:fullscreen .plyr, :-webkit-full-screen .plyr,
+:fullscreen .plyr__video-wrapper, :-webkit-full-screen .plyr__video-wrapper,
+:fullscreen .video-js, :-webkit-full-screen .video-js,
+:fullscreen .dplayer, :-webkit-full-screen .dplayer,
+:fullscreen .dplayer-video-wrap, :-webkit-full-screen .dplayer-video-wrap,
+:fullscreen .jwplayer, :-webkit-full-screen .jwplayer,
+:fullscreen #player, :-webkit-full-screen #player,
+:fullscreen #vplayer, :-webkit-full-screen #vplayer,
+:fullscreen #player-container, :-webkit-full-screen #player-container,
+:fullscreen iframe, :-webkit-full-screen iframe,
 .gdi-player-wrap:fullscreen .plyr,
 .gdi-player-wrap:-webkit-full-screen .plyr,
 .gdi-player-wrap:fullscreen .plyr__video-wrapper,
@@ -66,31 +103,24 @@ body.gdi-fv .gdi-player-wrap iframe{
 .gdi-player-wrap:-webkit-full-screen .video-js,
 .gdi-player-wrap:fullscreen .dplayer,
 .gdi-player-wrap:-webkit-full-screen .dplayer,
-.gdi-player-wrap:fullscreen .dplayer-video-wrap,
-.gdi-player-wrap:-webkit-full-screen .dplayer-video-wrap,
-.gdi-player-wrap:fullscreen .dplayer-video,
-.gdi-player-wrap:-webkit-full-screen .dplayer-video,
 .gdi-player-wrap:fullscreen .jwplayer,
 .gdi-player-wrap:-webkit-full-screen .jwplayer,
 .gdi-player-wrap:fullscreen #player,
 .gdi-player-wrap:-webkit-full-screen #player,
 .gdi-player-wrap:fullscreen #vplayer,
 .gdi-player-wrap:-webkit-full-screen #vplayer,
-.gdi-player-wrap:fullscreen #player-container,
-.gdi-player-wrap:-webkit-full-screen #player-container,
 .gdi-player-wrap:fullscreen iframe,
 .gdi-player-wrap:-webkit-full-screen iframe {
   width:100%!important; height:100%!important;
   max-width:none!important; max-height:none!important;
-  object-fit:contain!important;
-  margin:0 auto!important; padding:0!important;
+  margin:0!important; padding:0!important;
   display:block!important; background:#000!important;
-  border-radius:0!important; border:0!important;
+  border:0!important; border-radius:0!important;
 }
-.gdi-player-wrap:fullscreen video::-webkit-media-controls-overlay-enclosure,
-.gdi-player-wrap:-webkit-full-screen video::-webkit-media-controls-overlay-enclosure { display:block!important; }
-.gdi-player-wrap:fullscreen .plyr--full-ui input[type=range],
-.gdi-player-wrap:-webkit-full-screen .plyr--full-ui input[type=range] { width:100%!important; }
+
+/* Plyr controls em fullscreen — slider ocupa toda largura */
+:fullscreen .plyr--full-ui input[type=range],
+.gdi-player-wrap:fullscreen .plyr--full-ui input[type=range] { width:100%!important; }
 `;
     document.head.appendChild(s);
   }

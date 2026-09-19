@@ -14,10 +14,10 @@ var ferrotoThemeScript = '';
 const environment = 'production';
 
 // INICIO SAS
-   const serviceaccounts = [];
+   const serviceaccounts = []; // vazio — usar service_account:false no authConfig
 //FIM SAS
 
-const randomserviceaccount = serviceaccounts[Math.floor(Math.random() * serviceaccounts.length)];
+const randomserviceaccount = serviceaccounts.length ? serviceaccounts[Math.floor(Math.random() * serviceaccounts.length)] : null;
 const domains_for_dl = [''];
 const domain_for_dl = domains_for_dl[Math.floor(Math.random() * domains_for_dl.length)];
 const blocked_region = [''];
@@ -67,8 +67,10 @@ const authConfig = {
     ]
 };
 
-const crypto_base_key = "e864febecc3a3d5661c0b5a51170ed6a";
-const hmac_base_key = "395a72ba1a9db75d68b22c75db6e41963c78b3326f5900e6e754e6ad7ea4178937a873044696148769bb85c2b98a9a11b2625bc59ab6c8682880577fb44e62ac";
+// ★ FIX: chaves movidas para ENV (wrangler secret) — fallback hardcoded apenas p/ desenvolvimento
+// Em produção, defina em wrangler.toml: CRYPTO_BASE_KEY, HMAC_BASE_KEY
+const crypto_base_key = (typeof ENV !== 'undefined' && ENV && ENV.CRYPTO_BASE_KEY) || "e864febecc3a3d5661c0b5a51170ed6a";
+const hmac_base_key = (typeof ENV !== 'undefined' && ENV && ENV.HMAC_BASE_KEY) || "395a72ba1a9db75d68b22c75db6e41963c78b3326f5900e6e754e6ad7ea4178937a873044696148769bb85c2b98a9a11b2625bc59ab6c8682880577fb44e62ac";
 const GDOC_EXPORT_FORMATS = {
   'application/vnd.google-apps.document':     { name: 'Google Doc',    formats: [{ label: 'PDF',  mime: 'application/pdf', ext: 'pdf' }, { label: 'DOCX', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', ext: 'docx' }, { label: 'TXT', mime: 'text/plain', ext: 'txt' }] },
   'application/vnd.google-apps.spreadsheet':  { name: 'Google Sheet',  formats: [{ label: 'PDF',  mime: 'application/pdf', ext: 'pdf' }, { label: 'XLSX', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: 'xlsx' }, { label: 'CSV', mime: 'text/csv', ext: 'csv' }] },
@@ -847,15 +849,275 @@ async function handleSharedSummariesSave(request){
   const folderId=await gdiUserFolderId(gd0);
   if(!folderId)return new Response(JSON.stringify({ok:false,error:'no folder'}),{status:502,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
   const all=await gdiSharedSummariesRead(gd0, folderId);
-  // remove entradas antigas com mesmo lessonName (substitui)
-  const filtered=all.filter(s=>(s.lessonName||'')!==lessonName);
+  // ★ FIX anti-clobber: só remove entradas antigas do MESMO autor (user) com mesmo lessonName
+  // Isso impede que um aluno sobrescreva o resumo de outro sobre a mesma aula.
+  const filtered=all.filter(s=>!((s.lessonName||'')===lessonName && (s.author||'')===user));
   filtered.push({lessonName,summary,questions,author:user,date:Date.now()});
-  // limita a 500 resumos
-  if(filtered.length>500)filtered.splice(0,filtered.length-500);
+  // limita a 500 resumos (LRU: remove os mais antigos)
+  if(filtered.length>500)filtered.sort((a,b)=>(a.date||0)-(b.date||0)).splice(0,filtered.length-500);
   const ok=await gdiSharedSummariesWrite(gd0, folderId, filtered);
   return new Response(JSON.stringify({ok}),{status:ok?200:502,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
 }
 // ═══ fim ISA SHARED SUMMARIES ═══
+
+// ═══ REDAÇÃO — Correção de redações por banca + OCR + ensaio MD ═══
+// Rotas:
+//   POST /api/ai/redacao  (JSON: {text, banca, tipo} OU multipart/form-data com file)
+//     → retorna {ok, correction, score}
+//   POST /api/ai/essay/save  (JSON: {markdown, banca, tipo, score})
+//     → salva MD na pasta individual do aluno no Drive
+// ★ usado pela aba Redação (gdi-study.js)
+async function handleRedacaoCorrect(request){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  let text='',banca='',tipo='',mode='';
+  const ct=request.headers.get('content-type')||'';
+  if(ct.includes('multipart/form-data')){
+    const fd=await request.formData();
+    const file=fd.get('file');
+    mode=fd.get('mode')||'ocr';
+    banca=fd.get('banca')||'';
+    tipo=fd.get('tipo')||'';
+    if(file){
+      try{
+        const buf=await file.arrayBuffer();
+        if(file.type && file.type.startsWith('text/')){
+          text=new TextDecoder().decode(buf);
+        }else{
+          // ★ TODO: integrar @cf/llava quando binding de visão estiver habilitado
+          return new Response(JSON.stringify({ok:false,error:'OCR não disponível neste servidor. Cole o texto da redação manualmente ou habilite um modelo de visão no Cloudflare AI.'}),{status:400,headers:cors});
+        }
+      }catch(e){return new Response(JSON.stringify({ok:false,error:'Falha ao processar arquivo: '+e.message}),{status:400,headers:cors});}
+    }
+  }else{
+    let body;
+    try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:cors});}
+    text=body.text||'';
+    banca=body.banca||'';
+    tipo=body.tipo||'';
+  }
+  if(!text||text.length<50)return new Response(JSON.stringify({ok:false,error:'Texto muito curto (mín 50 chars)'}),{status:400,headers:cors});
+  const BANCA_CRITERIA={
+    'CEBRASPE (CESPE)':'CEBRASPE/CESPE escala 0-10: adequação ao tema, estrutura, desenvolvimento, coesão, gramática. Desclassifica se fuga ao tema.',
+    'FGV':'FGV 0-10: conteúdo (0-5), estrutura (0-3), linguagem (0-2).',
+    'VUNESP':'VUNESP 0-10: tema/conteúdo (0-4), estrutura (0-3), norma culta (0-3).',
+    'ENEM (5 competências)':'ENEM 5 competências (0-200 cada, total 0-1000).',
+    'FUVEST (dissertativa)':'FUVEST 0-100: conteúdo (0-50), estrutura (0-30), linguagem (0-20).',
+    'default':'Critérios gerais de concurso público brasileiro.'
+  };
+  const criterios=BANCA_CRITERIA[banca]||BANCA_CRITERIA['default'];
+  const prompt='Você é um corretor de redações experiente. Corrija esta redação (banca: '+banca+', tipo: '+tipo+').\n\nCRITÉRIOS: '+criterios+'\n\nFORMATO Markdown:\n## Nota Geral: X/10\n## Avaliação por Critério\n## Comentários por Parágrafo (cite o trecho)\n## Pontos Fortes\n## Pontos Fracos\n## Sugestões de Melhoria\n## Versão Reescrita\n\nREDAÇÃO ('+text.length+' chars):\n\n'+text.slice(0,8000);
+  const aiResp=await callUnifiedAi([{role:'user',content:prompt}],request);
+  if(!aiResp.ok)return new Response(JSON.stringify({ok:false,error:aiResp.error}),{status:502,headers:cors});
+  const m=aiResp.response.match(/nota\s*geral\s*:?\s*(\d+[,.]?\d*)/i);
+  const score=m?m[1]:'—';
+  try{
+    const md='---\nbanca: "'+banca+'"\ntipo: "'+tipo+'"\ndata: '+new Date().toISOString()+'\nscore: '+score+'\n---\n\n# Redação Corrigida\n\n## Original\n\n'+text.slice(0,4000)+'\n\n## Correção\n\n'+aiResp.response+'\n';
+    await gdiSaveEssayMD(request,md,banca,tipo,score);
+  }catch(_){}
+  return new Response(JSON.stringify({ok:true,correction:aiResp.response,score}),{headers:{...cors,'Cache-Control':'no-store'}});
+}
+
+// ── Salva MD da redação corrigida na pasta individual do aluno ──
+async function gdiSaveEssayMD(request,markdown,banca,tipo,score){
+  const gd0=gds[0];
+  if(!gd0)return false;
+  const user=await gdiSessionUser(request);
+  if(!user)return false;
+  const folderId=await gdiUserFolderId(gd0);
+  if(!folderId)return false;
+  const safeBanca=(banca||'banca').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,30);
+  const dateStr=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  const fileName='redacao_'+safeBanca+'_'+dateStr+'_'+String(score||'s').replace(/[^0-9a-zA-Z]/g,'')+'.md';
+  const q="'"+folderId+"' in parents and name = 'redacoes' and trashed = false";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id)',pageSize:'1'}),opts);
+  let subId=null;
+  if(r.ok){const j=await r.json();if(j.files&&j.files[0])subId=j.files[0].id;}
+  if(!subId){
+    const co=await gd0.requestOptions({'Content-Type':'application/json'},'POST');
+    co.body=JSON.stringify({name:'redacoes',mimeType:'application/vnd.google-apps.folder',parents:[folderId]});
+    const cr=await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',co);
+    if(!cr.ok)return false;
+    subId=(await cr.json()).id;
+  }
+  const boundary='gdiessay'+Date.now();
+  const body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:fileName,parents:[subId]})+'\r\n--'+boundary+'\r\nContent-Type: text/markdown; charset=UTF-8\r\n\r\n'+markdown+'\r\n--'+boundary+'--';
+  const uo=await gd0.requestOptions({'Content-Type':'multipart/related; boundary='+boundary},'POST');
+  const ur=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true',{method:'POST',headers:uo.headers,body});
+  return ur.ok;
+}
+
+async function handleEssaySave(request){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  let body;
+  try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:cors});}
+  const md=String(body.markdown||'').slice(0,100000);
+  if(!md)return new Response(JSON.stringify({ok:false,error:'no markdown'}),{status:400,headers:cors});
+  const ok=await gdiSaveEssayMD(request,md,body.banca||'',body.tipo||'',body.score||'');
+  return new Response(JSON.stringify({ok}),{status:ok?200:502,headers:cors});
+}
+
+// ── Helper: chama AI unificada (Meggy/NVIDIA/OpenAI/CF) — wrapper ──
+async function callUnifiedAi(messages,request){
+  const errors=[];
+  // ★ 1ª tentativa: OpenRouter em paralelo (race entre modelos free)
+  if(globalThis.OPENROUTER_API_KEY){
+    try{
+      const r = await callOpenRouterParallel(messages, {models: ['google/gemini-flash-1.5','mistralai/mistral-7b-instruct:free','qwen/qwen-2.5-7b-instruct:free']});
+      if(r && r.content) return {ok:true, response:r.content, model:r.model};
+      errors.push('OpenRouter: sem resposta vencedora');
+    }catch(e){errors.push('OpenRouter: '+e.message);}
+  }
+  if(globalThis.ZHIPU_API_KEY){
+    try{
+      const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),45000);
+      const r=await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+globalThis.ZHIPU_API_KEY},body:JSON.stringify({model:globalThis.AI_MODEL||'glm-4-flash',messages,max_tokens:4096,temperature:0.6,stream:false}),signal:ctrl.signal});
+      clearTimeout(to);
+      if(r.ok){const d=await r.json();if(d.choices&&d.choices[0]&&d.choices[0].message)return {ok:true,response:d.choices[0].message.content};
+      }
+      errors.push('Meggy HTTP '+r.status);
+    }catch(e){errors.push('Meggy: '+e.message);}
+  }
+  if(globalThis.NVIDIA_API_KEY){
+    try{
+      const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),45000);
+      const r=await fetch('https://integrate.api.nvidia.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+globalThis.NVIDIA_API_KEY},body:JSON.stringify({model:'meta/llama-3.1-8b-instruct',messages,max_tokens:4096,temperature:0.6,stream:false}),signal:ctrl.signal});
+      clearTimeout(to);
+      if(r.ok){const d=await r.json();if(d.choices&&d.choices[0]&&d.choices[0].message)return {ok:true,response:d.choices[0].message.content};
+      }
+      errors.push('NVIDIA HTTP '+r.status);
+    }catch(e){errors.push('NVIDIA: '+e.message);}
+  }
+  if(globalThis.OPENAI_API_KEY){
+    const url=globalThis.OPENAI_API_URL||'https://api.openai.com/v1/chat/completions';
+    try{
+      const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),45000);
+      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+globalThis.OPENAI_API_KEY},body:JSON.stringify({model:globalThis.AI_MODEL||'gpt-4o-mini',messages,max_tokens:4096,temperature:0.6,stream:false}),signal:ctrl.signal});
+      clearTimeout(to);
+      if(r.ok){const d=await r.json();if(d.choices&&d.choices[0]&&d.choices[0].message)return {ok:true,response:d.choices[0].message.content};
+      }
+      errors.push('OpenAI HTTP '+r.status);
+    }catch(e){errors.push('OpenAI: '+e.message);}
+  }
+  if(globalThis.AI && typeof globalThis.AI.run==='function'){
+    try{
+      const r=await globalThis.AI.run('@cf/meta/llama-3.1-8b-instruct',{messages});
+      if(r&&r.response)return {ok:true,response:r.response};
+      errors.push('CF AI: resposta vazia');
+    }catch(e){errors.push('CF AI: '+e.message);}
+  }
+  return {ok:false,error:'Todos os backends falharam: '+errors.join('; ')};
+}
+
+// ═══ FLASHCARDS COMPARTILHADOS — pool entre alunos da mesma matéria ═══
+const ISA_SHARED_FC_FILE='isa_shared_flashcards.json';
+async function gdiSharedFlashcardsRead(gd0,folderId){
+  const q="'"+folderId+"' in parents and name = '"+ISA_SHARED_FC_FILE+"' and trashed = false";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id)',pageSize:'1'}),opts);
+  if(!r.ok)return [];
+  const j=await r.json();
+  if(!j.files||!j.files[0])return [];
+  const fr=await fetch("https://www.googleapis.com/drive/v3/files/"+j.files[0].id+"?alt=media&supportsAllDrives=true",opts);
+  if(!fr.ok)return [];
+  try{const arr=JSON.parse(await fr.text());return Array.isArray(arr)?arr:[];}catch(_){return [];}
+}
+async function gdiSharedFlashcardsWrite(gd0,folderId,data){
+  const body=JSON.stringify(data);
+  const q="'"+folderId+"' in parents and name = '"+ISA_SHARED_FC_FILE+"' and trashed = false";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id)',pageSize:'1'}),opts);
+  let existingId=null;
+  if(r.ok){const j=await r.json();if(j.files&&j.files[0])existingId=j.files[0].id;}
+  if(existingId){
+    const po=await gd0.requestOptions({'Content-Type':'application/json; charset=UTF-8'},'PATCH');
+    const pr=await fetch("https://www.googleapis.com/upload/drive/v3/files/"+existingId+"?uploadType=media&supportsAllDrives=true",{method:'PATCH',headers:po.headers,body});
+    return pr.ok;
+  }
+  const boundary='gdifc'+Date.now();
+  const mp='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:ISA_SHARED_FC_FILE,parents:[folderId]})+'\r\n--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+body+'\r\n--'+boundary+'--';
+  const co=await gd0.requestOptions({'Content-Type':'multipart/related; boundary='+boundary},'POST');
+  const cr=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true',{method:'POST',headers:co.headers,body:mp});
+  return cr.ok;
+}
+async function handleSharedFlashcardsGet(request,url){
+  const gd0=gds[0];
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
+  const folderId=await gdiUserFolderId(gd0);
+  if(!folderId)return new Response(JSON.stringify({ok:true,items:[]}),{headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
+  const items=await gdiSharedFlashcardsRead(gd0,folderId);
+  const filter=url.searchParams.get('subject')||'';
+  const kind=url.searchParams.get('kind')||'';
+  let result=items;
+  if(filter)result=result.filter(it=>(it.subject||'').toLowerCase().includes(filter.toLowerCase()));
+  if(kind==='question')result=result.filter(it=>it.statement);
+  return new Response(JSON.stringify({ok:true,items:result.slice(-200)}),{headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*','Cache-Control':'no-store'}});
+}
+async function handleSharedFlashcardsSave(request){
+  const gd0=gds[0];
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
+  let body;
+  try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});}
+  const subject=body.subject||'';
+  const f=body.front||body.statement||'';
+  if(!subject||!f)return new Response(JSON.stringify({ok:false,error:'missing data'}),{status:400,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
+  const folderId=await gdiUserFolderId(gd0);
+  if(!folderId)return new Response(JSON.stringify({ok:false,error:'no folder'}),{status:502,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
+  const all=await gdiSharedFlashcardsRead(gd0,folderId);
+  const filtered=all.filter(it=>!((it.front||it.statement||'')===f && (it.author||'')===user));
+  filtered.push({subject,front:f,back:body.back||'',statement:body.statement||'',options:body.options||null,correct:body.correct||0,explanation:body.explanation||'',legalText:body.legalText||'',fundamentacao:body.fundamentacao||'',type:body.type||'mc',author:user,date:Date.now()});
+  if(filtered.length>1000)filtered.sort((a,b)=>(a.date||0)-(b.date||0)).splice(0,filtered.length-1000);
+  const ok=await gdiSharedFlashcardsWrite(gd0,folderId,filtered);
+  return new Response(JSON.stringify({ok}),{status:ok?200:502,headers:{'Content-Type':'application/json;charset=UTF-8','Access-Control-Allow-Origin':'*'}});
+}
+// ═══ fim FLASHCARDS COMPARTILHADOS ═══
+
+// ═══ BRAIN — cérebro da Meggy no Drive (memória em MD) ═══
+// A Meggy consulta/atualiza seu cérebro antes/depois de gerar materiais.
+// Salva tudo em MD para velocidade e leitura humana.
+async function handleBrainList(request, url){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  const gd0=gds[0];if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
+  const folderId=await gdiUserFolderId(gd0);if(!folderId)return new Response(JSON.stringify({ok:true,items:[]}),{headers:cors});
+  // procura subpasta brain/
+  const q="'"+folderId+"' in parents and name = 'brain' and trashed = false and mimeType = 'application/vnd.google-apps.folder'";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id)',pageSize:'1'}),opts);
+  if(!r.ok)return new Response(JSON.stringify({ok:true,items:[],error:'HTTP '+r.status}),{headers:cors});
+  const j=await r.json();if(!j.files||!j.files[0])return new Response(JSON.stringify({ok:true,items:[],message:'brain/ ainda não criado'}),{headers:cors});
+  // lista arquivos na subpasta brain/
+  const subId=j.files[0].id;
+  const filter=url.searchParams.get('q')||'';
+  const q2="'"+subId+"' in parents and trashed = false"+(filter?" and name contains '"+filter.replace(/'/g,"\\'")+"'":'');
+  const r2=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:q2,fields:'files(id,name,mimeType,modifiedTime,size)',pageSize:'100',orderBy:'modifiedTime desc'}),opts);
+  if(!r2.ok)return new Response(JSON.stringify({ok:true,items:[],error:'HTTP '+r2.status}),{headers:cors});
+  const j2=await r2.json();
+  const items=(j2.files||[]).map(f=>({id:f.id,name:f.name,mimeType:f.mimeType,modified:f.modifiedTime||null,size:f.size||null}));
+  return new Response(JSON.stringify({ok:true,items,total:items.length}),{headers:{...cors,'Cache-Control':'no-store'}});
+}
+
+async function handleBrainSave(request){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  let body;
+  try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:cors});}
+  const md=String(body.markdown||body.content||'').slice(0,200000);
+  const fileName=String(body.fileName||('brain_'+Date.now()+'.md')).slice(0,100);
+  if(!md)return new Response(JSON.stringify({ok:false,error:'no content'}),{status:400,headers:cors});
+  const gd0=gds[0];if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
+  const folderId=await gdiUserFolderId(gd0);if(!folderId)return new Response(JSON.stringify({ok:false,error:'no folder'}),{status:502,headers:cors});
+  const ok=await gdiSaveMaterialToSubfolder(gd0,folderId,'brain',fileName,md);
+  return new Response(JSON.stringify({ok}),{status:ok?200:502,headers:cors});
+}
 
 // ═══ CADASTRO — contas salvas em .gdi_users.json no Drive ═══
 const USERS_REGISTRY_FILE = '.gdi_users.json';
@@ -1141,11 +1403,11 @@ tr:hover td{background:rgba(255,255,255,.03)}
   // ═══ Service Worker (offline) ═══
   if (path == '/sw.js' || path == '/gdi-sw.js') {
     const GDI_SW = `
-const VERSION='gdi-v2';
+const VERSION='gdi-v3';
 const SHELL=VERSION+'-shell';
 const MEDIA=VERSION+'-media';
 const MAX_MEDIA=60, MAX_SHELL=80, MAX_BYTES=250*1024*1024;
-const CDN_HOSTS=['cdn.plyr.io','vjs.zencdn.net','cdn.jsdelivr.net','content.jwplatform.com'];
+const CDN_HOSTS=['cdn.plyr.io','vjs.zencdn.net','cdn.jsdelivr.net','content.jwplatform.com','raw.githack.com'];
 const MEDIA_EXT=/\\.(mp4|webm|mkv|m4v|mov|avi|mp3|m4a|wav|ogg|flac|pdf|jpg|jpeg|png|webp|gif|svg|ico)$/i;
 self.addEventListener('install',function(){self.skipWaiting();});
 self.addEventListener('activate',function(e){e.waitUntil((async function(){
@@ -1192,12 +1454,18 @@ self.addEventListener('fetch',function(e){
   if(url.origin!==location.origin){
     var cdn=CDN_HOSTS.some(function(h){return url.hostname===h||url.hostname.endsWith('.'+h)});
     if(!cdn)return;
+    var isJS=/\.js(\?|$)/i.test(url.pathname);
     e.respondWith((async function(){
       var c=await caches.open(SHELL);
-      var hit=await c.match(req);
-      if(hit)return hit;
-      try{var r=await fetch(req);if(r.ok&&!isLoginRedirect(r))c.put(req,r.clone());return r;}
-      catch(_){return hit||Response.error();}
+      if(isJS){
+        try{var r=await fetch(req);if(r.ok&&!isLoginRedirect(r))c.put(req,r.clone());return r;}
+        catch(_){var hit=await c.match(req);if(hit)return hit;return Response.error();}
+      }else{
+        var hit=await c.match(req);
+        if(hit)return hit;
+        try{var r=await fetch(req);if(r.ok&&!isLoginRedirect(r))c.put(req,r.clone());return r;}
+        catch(_){return hit||Response.error();}
+      }
     })());
     return;
   }
@@ -1475,6 +1743,33 @@ self.addEventListener('fetch',function(e){
   if (path === '/api/ai/cache' && request.method === 'POST') return handleIsaCacheSave(request);
   if (path === '/api/ai/shared-summaries' && request.method === 'GET') return handleSharedSummariesGet(request, url);
   if (path === '/api/ai/shared-summaries' && request.method === 'POST') return handleSharedSummariesSave(request);
+  if (path === '/api/ai/shared-summaries' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ NOVAS ROTAS: redação + flashcards compartilhados + ensaio MD
+  if (path === '/api/ai/redacao' && request.method === 'POST') return handleRedacaoCorrect(request);
+  if (path === '/api/ai/redacao' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  if (path === '/api/ai/essay/save' && request.method === 'POST') return handleEssaySave(request);
+  if (path === '/api/ai/essay/save' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  if (path === '/api/ai/shared-flashcards' && request.method === 'GET') return handleSharedFlashcardsGet(request, url);
+  if (path === '/api/ai/shared-flashcards' && request.method === 'POST') return handleSharedFlashcardsSave(request);
+  if (path === '/api/ai/shared-flashcards' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ BATALHÃO: endpoint que dispara processamento em background
+  if (path === '/api/ai/battalion' && request.method === 'POST') return handleBattalion(request, event);
+  if (path === '/api/ai/battalion' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ Status do batalhão: aluno consulta se o curso já foi processado
+  if (path === '/api/ai/battalion/status' && request.method === 'GET') return handleBattalionStatus(request, url);
+  // ★ COURSES: lista geral de cursos compartilhada entre usuários (general_courses.json no Drive)
+  if (path === '/api/courses/add' && request.method === 'POST') return handleCourseAdd(request);
+  if (path === '/api/courses/add' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  if (path === '/api/courses/list' && request.method === 'GET') return handleCourseList(request, url);
+  if (path === '/api/courses/list' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ MATERIALS: lê materiais gerados pelo batalhão (subpastas resumos/cards/pilulas/questoes/simulados)
+  if (path === '/api/materials/list' && request.method === 'GET') return handleMaterialsList(request, url);
+  if (path === '/api/materials/list' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ BRAIN: cérebro da Meggy no Drive (memória persistente em MD)
+  if (path === '/api/brain/list' && request.method === 'GET') return handleBrainList(request, url);
+  if (path === '/api/brain/list' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  if (path === '/api/brain/save' && request.method === 'POST') return handleBrainSave(request);
+  if (path === '/api/brain/save' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
   if (path === '/api/ai/cache' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
   if (path === '/api/ai/models' && request.method === 'GET') {
     // Diagnóstico: lista modelos disponíveis na NVIDIA NIM da conta.
@@ -1509,8 +1804,9 @@ self.addEventListener('fetch',function(e){
     const nvidiaKey = globalThis.NVIDIA_API_KEY;
     const openaiKey = globalThis.OPENAI_API_KEY;
     const cfAi = globalThis.AI && typeof globalThis.AI.run === 'function';
-    const enabled = !!(zhipuKey || nvidiaKey || openaiKey || cfAi);
-    const provider = zhipuKey ? 'zhipu-ai' : (nvidiaKey ? 'nvidia-nim' : (cfAi ? 'cf-workers-ai' : (openaiKey ? 'openai' : null)));
+    const openrouterKey = globalThis.OPENROUTER_API_KEY;
+    const enabled = !!(zhipuKey || nvidiaKey || openaiKey || cfAi || openrouterKey);
+    const provider = openrouterKey ? 'openrouter-battalion' : (zhipuKey ? 'meggy-blacktie' : (nvidiaKey ? 'nvidia-nim' : (cfAi ? 'cf-workers-ai' : (openaiKey ? 'openai' : null))));
     return new Response(JSON.stringify({ enabled, provider }), { status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json;charset=UTF-8', 'Cache-Control': 'no-store' } });
   }
   if (path === '/api/ai' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,X-Key-Hint' } });
@@ -1749,16 +2045,489 @@ async function generateLink(file_id, user_ip) {
 // ═══════════════════════════════════════════════════════════════
 // IA — rota /api/ai (widget M-AI "ISA — a mais bela" chama esta rota
 // quando a IA do navegador não está disponível).
-// MOTOR PADRÃO: 智谱AI (Zhipu AI / GLM) — o mesmo da demo.
+// MOTOR PADRÃO: Meggy AI (BlackTie GLM)
 //   Defina ZHIPU_API_KEY nas variáveis de ambiente do Cloudflare.
 //   Modelo padrão: glm-4-flash (rápido e econômico). Troque com
 //   AI_MODEL=glm-4-plus se quiser mais qualidade.
 // Ordem de prioridade:
-//   1) Meggy AI via ZHIPU_API_KEY  ← PADRÃO (mesmo motor da demo)
+//   1) Meggy AI (BlackTie) via ZHIPU_API_KEY  ← PADRÃO (mesmo motor da demo)
 //   2) Cloudflare Workers AI (binding AI) ← alternativo grátis
 //   3) Endpoint OpenAI-compat (OPENAI_API_KEY + OPENAI_API_URL)
 // System prompt contextualiza a IA como ISA — tutora do acervo.
 // ═══════════════════════════════════════════════════════════════
+// ═══ OPENROUTER — Batalhão de modelos free em paralelo ═══
+// O OpenRouter oferece acesso unificado a múltiplos LLMs free.
+// Disparamos vários modelos em paralelo (Promise.any) — primeiro a responder vence.
+// Configurar: wrangler secret put OPENROUTER_API_KEY
+const OPENROUTER_FREE_MODELS = [
+  'google/gemini-flash-1.5',                  // free, rápido, 1M contexto
+  'meta-llama/llama-3.1-8b-instruct:free',     // free, 128k
+  'meta-llama/llama-3.1-70b-instruct:free',    // free, 70B params
+  'mistralai/mistral-7b-instruct:free',        // free, rápido
+  'mistralai/mistral-nemo:free',               // free, 128k
+  'qwen/qwen-2.5-7b-instruct:free',            // free, ótimo em PT
+  'qwen/qwen-2.5-72b-instruct:free',           // free, 72B
+  'microsoft/phi-3-mini-128k-instruct:free',  // free, 128k
+  'nousresearch/hermes-3-llama-3.1-405b:free', // free, 405B
+  'huggingfaceh4/zephyr-7b-beta:free',         // free
+  'google/gemma-2-9b-it:free',                // free, 9B
+  'deepseek/deepseek-chat:free',              // free, 64k, V3
+  'deepseek/deepseek-r1:free',                // free, raciocínio
+  'meta-llama/llama-3.3-70b-instruct:free',   // free, 70B
+  'thudm/glm-4-9b-chat:free',                // free, GLM-4 9B
+];
+
+// ── Dispara múltiplos modelos em paralelo — primeiro a responder vence ──
+async function callOpenRouterParallel(messages, opts){
+  const key = globalThis.OPENROUTER_API_KEY;
+  if(!key) return null;
+  const models = (opts && opts.models && opts.models.length) ? opts.models : OPENROUTER_FREE_MODELS.slice(0, 5);
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 45000);
+  const body = JSON.stringify({
+    model: models[0],  // OpenRouter aceita um model por request; rotacionamos
+    messages, max_tokens: 4096, temperature: 0.6, stream: false,
+    transforms: ['middle-out']  // compressão automática de contexto longo
+  });
+  // ★ dispara 3 modelos em paralelo (race)
+  const racers = models.slice(0, 3).map((m, i) => {
+    return (async () => {
+      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + key,
+          'HTTP-Referer': 'https://gdi.js.org',
+          'X-Title': 'Meggy GDI Extras'
+        },
+        body: JSON.stringify({...JSON.parse(body), model: m}),
+        signal: ctrl.signal
+      });
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      if(!d.choices || !d.choices[0] || !d.choices[0].message) throw new Error('empty response from ' + m);
+      return { model: m, content: d.choices[0].message.content, latencyMs: Date.now() - (opts && opts._t0 || Date.now()) };
+    })();
+  });
+  try {
+    // primeiro a retornar vence; outros são cancelados
+    const winner = await Promise.any(racers);
+    clearTimeout(to);
+    return winner;
+  } catch(e) {
+    clearTimeout(to);
+    return null;
+  }
+}
+
+// ── Batalhão de IA em background ──
+// Quando aluno adiciona curso, gera em paralelo resumos+questões+flashcards
+// para todas as aulas/PDFs do curso. Resultados ficam no cache ISA compartilhado,
+// beneficiando futuros alunos que adicionarem o mesmo curso.
+async function handleBattalion(request, event){
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json;charset=UTF-8' };
+  const user = await gdiSessionUser(request);
+  if(!user) return new Response(JSON.stringify({ok:false, error:'auth'}), {status:401, headers:cors});
+  let body;
+  try { body = await request.json(); } catch(_) { return new Response(JSON.stringify({ok:false, error:'invalid json'}), {status:400, headers:cors}); }
+  const courseKey = String(body.courseKey || '').slice(0, 200);
+  const coursePath = String(body.coursePath || '').slice(0, 500);
+  const pdfList = Array.isArray(body.pdfs) ? body.pdfs.slice(0, 50) : [];
+  const lessonName = String(body.lessonName || courseKey).slice(0, 200);
+  if(!courseKey && !pdfList.length) return new Response(JSON.stringify({ok:false, error:'missing courseKey or pdfs'}), {status:400, headers:cors});
+
+  // ★ dispara processamento em background (event.waitUntil mantém o worker vivo após resposta)
+  if(event && event.waitUntil){
+    event.waitUntil(runBattalionInBackground(courseKey, coursePath, lessonName, pdfList, user));
+  }
+  return new Response(JSON.stringify({ok:true, message:'Batalhão iniciado em background', courseKey, pdfs: pdfList.length}), {headers: {...cors, 'Cache-Control':'no-store'}});
+}
+
+// ── Worker do batalhão: gera tudo em paralelo para cada PDF do curso ──
+async function runBattalionInBackground(courseKey, coursePath, lessonName, pdfList, user){
+  const gd0 = gds[0];
+  if(!gd0) return;
+  try{
+    const folderId = await gdiUserFolderId(gd0);
+    if(!folderId) return;
+
+    // se já existe cache ISA para este curso, pula
+    const cache = await gdiIsaCacheRead(gd0, folderId);
+    if(cache[courseKey] && cache[courseKey].summary && cache[courseKey].questions){ return; }
+
+    // ★ FIX: se pdfList vazio, escaneia coursePath no Drive
+    if(!pdfList || !pdfList.length){
+      console.log('[Battalion] pdfList vazio — escaneando Drive:', coursePath);
+      try{
+        const drive0=gds[0];
+        const result=await drive0.request_list_of_files(coursePath,null,0);
+        // ★ CRÍTICO FIX: result.data.files (não result.files!) — request_list_of_files retorna {data:{files:[...]}}
+        if(result&&result.data&&Array.isArray(result.data.files)){
+          for(const f of result.data.files){
+            if(f.mimeType&&f.mimeType.includes('pdf'))pdfList.push({name:f.name,id:f.id,text:''});
+            if(f.mimeType&&(f.mimeType==='application/vnd.google-apps.folder'||f.mimeType.includes('folder'))){
+              try{
+                const sub=await drive0.request_list_of_files(coursePath+(coursePath.endsWith('/')?'':'/')+encodeURIComponent(f.name),null,0);
+                if(sub&&sub.data&&Array.isArray(sub.data.files))for(const sf of sub.data.files){
+                  if(sf.mimeType&&sf.mimeType.includes('pdf'))pdfList.push({name:sf.name,id:sf.id,text:''});
+                }
+              }catch(_){}
+            }
+          }
+        }
+        console.log('[Battalion] scan encontrou',pdfList.length,'PDF(s)');
+      }catch(e){console.error('[Battalion] erro scan:',e.message);}
+    }
+    // para cada PDF: 3 chamadas paralelas
+    const tasks = [];
+    for(let i = 0; i < pdfList.length; i++){
+      const pdf = pdfList[i];
+      const pdfName = String(pdf.name || 'aula-' + (i+1)).slice(0, 100);
+      // ★ baixa PDF do Drive se não tiver texto
+      let pdfText = String(pdf.text || '').slice(0, 15000);
+      if(!pdfText && pdf.id){
+        try{
+          const opts=await gd0.requestOptions();
+          const r=await fetch('https://www.googleapis.com/drive/v3/files/'+pdf.id+'?alt=media&supportsAllDrives=true',opts);
+          if(r.ok)pdfText=(await r.text()).slice(0,15000);
+          console.log('[Battalion] PDF baixado:',pdfName,pdfText.length,'chars');
+        }catch(e){console.warn('[Battalion] falha baixar PDF:',e.message);}
+      }
+      if(!pdfText) continue;  // sem texto não há o que processar não há o que processar
+
+      const keyPrefix = courseKey + '/' + pdfName;
+
+      // dispara resumo + pílulas + questões em paralelo (usando OpenRouter primeiro, fallback Meggy)
+      tasks.push(battalionGenSummary(keyPrefix, lessonName, pdfName, pdfText, gd0, folderId));
+      tasks.push(battalionGenPills(keyPrefix, lessonName, pdfName, pdfText, gd0, folderId));
+      tasks.push(battalionGenQuestions(keyPrefix, lessonName, pdfName, pdfText, gd0, folderId));
+    }
+
+    // executa TODOS os PDFs × 3 tarefas em paralelo (Promise.allSettled não trava se algum falhar)
+    await Promise.allSettled(tasks);
+
+    // salva um marcador de que o curso foi processado
+    const finalCache = await gdiIsaCacheRead(gd0, folderId);
+    finalCache[courseKey] = finalCache[courseKey] || {};
+    finalCache[courseKey].battalionDone = true;
+    finalCache[courseKey].battalionDate = Date.now();
+    await gdiIsaCacheWrite(gd0, folderId, finalCache);
+
+    // compartilha no pool de resumos para futuros alunos
+    // ★ CRITICO FIX: iterar childKeys (courseKey/pdfName) + await correto + anti-clobber por autor
+    const childKeys=Object.keys(finalCache).filter(k=>k.startsWith(courseKey+'/'));
+    const firstSummaryKey=childKeys.find(k=>finalCache[k]&&finalCache[k].summary);
+    if(firstSummaryKey){
+      try{
+        const existing=await gdiSharedSummariesRead(gd0,folderId);
+        const filtered=Array.isArray(existing)?existing.filter(s=>!((s.lessonName||'')===lessonName&&(s.author||'')===user)):[];
+        filtered.push({lessonName,summary:finalCache[firstSummaryKey].summary,questions:finalCache[firstSummaryKey].questions||null,author:user,date:Date.now()});
+        await gdiSharedSummariesWrite(gd0,folderId,filtered);
+      }catch(shareErr){console.error('[Battalion] erro ao compartilhar:',shareErr.message);}
+    }
+  }catch(e){
+    console.error('[Battalion] falha:', e.message);
+  }
+}
+
+async function battalionGenSummary(keyPrefix, lesson, pdfName, pdfText, gd0, folderId){
+  // ★ PROMPT ATUALIZADO: detecta leis desatualizadas e adapta o resumo
+  const SYSTEM_PROMPT = `Você é a Meggy, tutora de estudos jurídicos brasileira. Sua missão é gerar resumos DIDÁTICOS em Markdown, sempre atualizados com a legislação VIGENTE.
+
+DETECÇÃO DE LEIS DESATUALIZADAS (CRÍTICO):
+Ao ler o material, IDENTIFIQUE se há referência a leis desatualizadas/revogadas. Lista de substituições comuns (não exaustiva):
+- Lei 8.666/1993 (Licitações) → REVIGADA pela Lei 14.133/2021 (Nova Lei de Licitações e Contratos)
+- CPC de 1973 (Lei 5.869) → REVIGADO pelo CPC de 2015 (Lei 13.105)
+- Lei 9.504/1997 (Eleições) → parcialmente alterada pelas Leis 13.487/2017, 14.211/2021
+- Lei 12.529/2011 (Defesa da Concorrência) → vigente com alterações
+
+REGRAS:
+1. Se o material referenciar LEI REVIGADA, você DEVE:
+   - INICIAR o resumo com alerta: \"⚠️ MATERIAL DESATUALIZADO - Lei X foi revogada pela Lei Y\"
+   - Mostrar o TÓPICO correto na legislação atual
+   - Comparar old vs new (principais mudanças)
+   - NÃO detalhar a lei antiga como se estivesse vigente
+2. Se a lei estiver VIGENTE, faça resumo normal didático
+3. Sempre cite o artigo/dispositivo correto da lei atual
+4. Use Markdown com seções ## para facilitar leitura
+
+FORMATO MARKDOWN:
+## Resumo: <nome da aula>
+## Legislação Aplicável (atualizada)
+## Pontos-Chave
+## Alerta de Desatualização (se aplicável)
+## Sugestão de Estudo`;
+
+  const messages = [{role:'system', content:SYSTEM_PROMPT}, {role:'user', content:'Resuma esta aula ('+pdfName+') do curso '+lesson+'. Material:\n\n'+pdfText}];
+  let result = await callOpenRouterParallel(messages, {models: ['google/gemini-flash-1.5','meta-llama/llama-3.1-8b-instruct:free','mistralai/mistral-7b-instruct:free']});
+  if(!result) result = await callUnifiedAi(messages, null);
+  if(!result || !result.ok || !result.response) return;
+  // ★ detecta se material estava desatualizado (para pular questões/simulados depois)
+  const isOutdated = /revogada|revogado|desatualizad|lei\s+8\.?666|lei\s+5\.?869|cpc\s+1973/i.test(result.response);
+  // ★ salva em cache ISA (para a aba Resumos)
+  const cache = await gdiIsaCacheRead(gd0, folderId);
+  cache[keyPrefix] = cache[keyPrefix] || {date: Date.now()};
+  cache[keyPrefix].summary = result.response;
+  cache[keyPrefix].lessonName = lesson + ' - ' + pdfName;
+  cache[keyPrefix].coursePath = lesson;
+  cache[keyPrefix].outdated = isOutdated;
+  await gdiIsaCacheWrite(gd0, folderId, cache);
+  // ★ salva na subpasta resumos/ dentro da pasta do aluno (com coursePath no nome)
+  try{
+    const safeLesson=(lesson||'curso').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40);
+    const safePdf=(pdfName||'aula').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40);
+    const fileName=safeLesson+'_'+safePdf+'_'+Date.now()+'.md';
+    await gdiSaveMaterialToSubfolder(gd0, folderId, 'resumos', fileName, result.response);
+  }catch(_){}
+  // ★ também salva na brain/ da Meggy (memória persistente em MD)
+  try{
+    const brainContent = '# Resumo: '+lesson+' - '+pdfName+'\n\n'+result.response+'\n\n---\nGerado: '+new Date().toISOString()+'\n';
+    const safeLesson2=(lesson||'curso').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40);
+    await gdiSaveMaterialToSubfolder(gd0, folderId, 'brain', 'resumo_'+safeLesson2+'_'+Date.now()+'.md', brainContent);
+  }catch(_){}
+}
+
+async function battalionGenPills(keyPrefix, lesson, pdfName, pdfText, gd0, folderId){
+  // ★ PROMPT ATUALIZADO: se material desatualizado, pílulas focam em diferenças old vs new
+  const SYSTEM_PROMPT = `Você é a Meggy. Gere pílulas de revisão em bullets Markdown (máx 15 bullets).
+
+REGRAS:
+1. Se o material referenciar LEI REVIGADA/DESATUALIZADA, as pílulas DEVEM focar em:
+   - ⚠️ Alertar qual lei foi revogada
+   - 📌 Qual é a lei ATUAL que substitui
+   - 🔄 Principais MUDANÇAS (old vs new) — bullet por bullet
+   - ❌ O que NÃO vale mais (anulado)
+   - ✅ O que passou a valer
+2. Se a lei estiver VIGENTE, faça pílulas normais de revisão
+3. Sempre cite dispositivo correto
+
+Formato:
+# Pílulas — <aula>
+- Bullet 1
+- Bullet 2
+...`;
+
+  const messages = [{role:'system', content:SYSTEM_PROMPT}, {role:'user', content:'Crie 15 bullets de revisão para esta aula ('+pdfName+') do curso '+lesson+'.\n\n'+pdfText}];
+  let result = await callOpenRouterParallel(messages, {models: ['mistralai/mistral-7b-instruct:free','qwen/qwen-2.5-7b-instruct:free','google/gemma-2-9b-it:free']});
+  if(!result) result = await callUnifiedAi(messages, null);
+  if(!result || !result.ok || !result.response) return;
+  const cache = await gdiIsaCacheRead(gd0, folderId);
+  cache[keyPrefix] = cache[keyPrefix] || {date: Date.now()};
+  cache[keyPrefix].mindmap = result.response;
+  await gdiIsaCacheWrite(gd0, folderId, cache);
+  // ★ salva na subpasta pilulas/
+  try{
+    const safeLesson=(lesson||'curso').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40);
+    const safePdf=(pdfName||'aula').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40);
+    const fileName=safeLesson+'_'+safePdf+'_'+Date.now()+'.md';
+    await gdiSaveMaterialToSubfolder(gd0, folderId, 'pilulas', fileName, result.response);
+  }catch(_){}
+}
+
+async function battalionGenQuestions(keyPrefix, lesson, pdfName, pdfText, gd0, folderId){
+  // ★ CHECK: se material desatualizado, PULA geração de questões (aluno não deve treinar lei errada)
+  const cache0 = await gdiIsaCacheRead(gd0, folderId);
+  if(cache0[keyPrefix] && cache0[keyPrefix].outdated){
+    console.log('[Battalion] '+keyPrefix+' desatualizado — PULANDO questões');
+    return;
+  }
+  // ★ PROMPT: questões SEM letras A) B) C) D) — só pergunta + resposta correta
+  const PROMPT='Você é um examinador de concurso público brasileiro. Gere 10 questões em JSON array.\n\nFORMATO OBRIGATÓRIO (sem letras nas respostas):\n[\n  {\n    "type": "mc",\n    "statement": "Enunciado da questão em forma de pergunta.",\n    "options": ["texto da opção 1 sem letra", "texto da opção 2 sem letra", "texto da opção 3 sem letra", "texto da opção 4 sem letra"],\n    "correct": 0,\n    "correctText": "texto da resposta correta (sem letra A) B) etc)",\n    "legalText": "dispositivo legal aplicável (ex: art. 5º, CF; Lei 14.133/2021)",\n    "explanation": "explicação técnica do acerto",\n    "fundamentacao": "justificativa didática completa"\n  },\n  {\n    "type": "tf",\n    "statement": "Afirmação para julgar certo ou errado.",\n    "correct": 1,\n    "correctText": "Errado",\n    "legalText": "...",\n    "explanation": "...",\n    "fundamentacao": "..."\n  }\n]\n\nREGRAS CRÍTICAS:\n1. NÃO incluir prefixos "A)", "B)", "C)", "D)" nas opções — só o texto\n2. correctText é a resposta em texto puro\n3. Para type "tf", correctText deve ser "Certo" ou "Errado"\n4. legalText sempre com lei ATUAL (não use leis revogadas como 8.666)\n5. Use legislação vigente (Lei 14.133/2021 em vez de 8.666, CPC 2015 em vez de 1973)\n6. Sem comentários, só JSON array\n\nMaterial:\n'+pdfText;
+  const messages = [{role:'system', content:'Você gera questões de concurso em JSON.'}, {role:'user', content:PROMPT}];
+  let result = await callOpenRouterParallel(messages, {models: ['qwen/qwen-2.5-7b-instruct:free','deepseek/deepseek-chat:free','meta-llama/llama-3.1-8b-instruct:free']});
+  if(!result) result = await callUnifiedAi(messages, null);
+  if(!result || !result.ok || !result.response) return;
+  const cache = await gdiIsaCacheRead(gd0, folderId);
+  cache[keyPrefix] = cache[keyPrefix] || {date: Date.now()};
+  let parsed=null;
+  try{ parsed=JSON.parse(result.response); cache[keyPrefix].questions=parsed; }catch(_){ cache[keyPrefix].questions=result.response; }
+  await gdiIsaCacheWrite(gd0, folderId, cache);
+  try{
+    const safeLesson=(lesson||'curso').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40);
+    const safePdf=(pdfName||'aula').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40);
+    const dateStr=Date.now();
+    if(parsed && Array.isArray(parsed)){
+      await gdiSaveMaterialToSubfolder(gd0, folderId, 'questoes', safeLesson+'_'+safePdf+'_'+dateStr+'.json', parsed);
+      // ★ cria cards SEM letras — só pergunta + resposta (correctText em vez de 'A) opção')
+      const cards=parsed.map(q=>({
+        f: q.statement||'',
+        b: (q.correctText||'')+(q.explanation?'\n\n💡 '+q.explanation:'')+(q.legalText?'\n\n⚖️ '+q.legalText:'')+(q.fundamentacao?'\n\n📚 '+q.fundamentacao:''),
+        subject:lesson, type:q.type||'mc'
+      }));
+      await gdiSaveMaterialToSubfolder(gd0, folderId, 'cards', safeLesson+'_'+safePdf+'_'+dateStr+'.json', cards);
+      const sim={ title:safeLesson+' - Simulado auto-gerado', date:dateStr, questions:parsed.slice(0,5).map((q,i)=>({id:i,...q})), source:'battalion' };
+      await gdiSaveMaterialToSubfolder(gd0, folderId, 'simulados', safeLesson+'_'+dateStr+'.json', sim);
+    }
+  }catch(_){}
+}
+
+// ═══ fim BATALHÃO ═══
+
+// ═══ COURSES — general_courses.json compartilhado entre usuários no Drive ═══
+const GENERAL_COURSES_FILE='general_courses.json';
+
+async function gdiGeneralCoursesRead(gd0, folderId){
+  const q="'"+folderId+"' in parents and name = '"+GENERAL_COURSES_FILE+"' and trashed = false";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id)',pageSize:'1'}),opts);
+  if(!r.ok)return [];
+  const j=await r.json();
+  if(!j.files||!j.files[0])return [];
+  const fr=await fetch("https://www.googleapis.com/drive/v3/files/"+j.files[0].id+"?alt=media&supportsAllDrives=true",opts);
+  if(!fr.ok)return [];
+  try{const arr=JSON.parse(await fr.text());return Array.isArray(arr)?arr:[];}catch(_){return [];}
+}
+
+async function gdiGeneralCoursesWrite(gd0, folderId, data){
+  const body=JSON.stringify(data);
+  const q="'"+folderId+"' in parents and name = '"+GENERAL_COURSES_FILE+"' and trashed = false";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id)',pageSize:'1'}),opts);
+  let existingId=null;
+  if(r.ok){const j=await r.json();if(j.files&&j.files[0])existingId=j.files[0].id;}
+  if(existingId){
+    const po=await gd0.requestOptions({'Content-Type':'application/json; charset=UTF-8'},'PATCH');
+    const pr=await fetch("https://www.googleapis.com/upload/drive/v3/files/"+existingId+"?uploadType=media&supportsAllDrives=true",{method:'PATCH',headers:po.headers,body});
+    return pr.ok;
+  }
+  const boundary='gdicourses'+Date.now();
+  const mp='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:GENERAL_COURSES_FILE,parents:[folderId]})+'\r\n--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+body+'\r\n--'+boundary+'--';
+  const co=await gd0.requestOptions({'Content-Type':'multipart/related; boundary='+boundary},'POST');
+  const cr=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true',{method:'POST',headers:co.headers,body:mp});
+  return cr.ok;
+}
+
+async function handleCourseAdd(request){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  let body;
+  try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:cors});}
+  const coursePath=String(body.coursePath||'').slice(0,500);
+  const courseName=String(body.courseName||'').slice(0,200);
+  const pdfCount=parseInt(body.pdfCount||'0',10);
+  if(!coursePath)return new Response(JSON.stringify({ok:false,error:'no coursePath'}),{status:400,headers:cors});
+  const gd0=gds[0];
+  if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
+  const folderId=await gdiUserFolderId(gd0);
+  if(!folderId)return new Response(JSON.stringify({ok:false,error:'no folder'}),{status:502,headers:cors});
+  // lê lista geral
+  const all=await gdiGeneralCoursesRead(gd0,folderId);
+  // encontra curso existente por path
+  let entry=all.find(c=>(c.coursePath||'')===coursePath);
+  if(!entry){
+    // cria novo curso
+    entry={coursePath,courseName,pdfCount,addedAt:Date.now(),users:[user],materialsReady:false};
+    all.push(entry);
+  }else{
+    // já existe — adiciona usuário à lista se não estiver
+    if(!entry.users)entry.users=[];
+    if(!entry.users.includes(user))entry.users.push(user);
+    // atualiza nome se vier diferente
+    if(courseName&&!entry.courseName)entry.courseName=courseName;
+  }
+  // limita a 1000 cursos
+  if(all.length>1000)all.sort((a,b)=>(a.addedAt||0)-(b.addedAt||0)).splice(0,all.length-1000);
+  const ok=await gdiGeneralCoursesWrite(gd0,folderId,all);
+  return new Response(JSON.stringify({ok,entry,courseCount:all.length}),{status:ok?200:502,headers:cors});
+}
+
+async function handleCourseList(request,url){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  const gd0=gds[0];
+  if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
+  const folderId=await gdiUserFolderId(gd0);
+  if(!folderId)return new Response(JSON.stringify({ok:true,courses:[]}),{headers:cors});
+  const all=await gdiGeneralCoursesRead(gd0,folderId);
+  // retorna só cursos vinculados a este usuário OU cursos públicos (sem users definido)
+  const mine=all.filter(c=>!c.users||c.users.length===0||c.users.includes(user));
+  return new Response(JSON.stringify({ok:true,courses:mine,total:mine.length}),{headers:{...cors,'Cache-Control':'no-store'}});
+}
+
+// ═══ MATERIALS — lê materiais gerados pelo batalhão nas subpastas do aluno ═══
+async function handleMaterialsList(request,url){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  const kind=url.searchParams.get('kind')||'';  // resumos | cards | pilulas | questoes | simulados
+  const courseKey=url.searchParams.get('course')||'';  // opcional: filtra por curso
+  if(!kind)return new Response(JSON.stringify({ok:false,error:'no kind'}),{status:400,headers:cors});
+  const gd0=gds[0];
+  if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
+  const folderId=await gdiUserFolderId(gd0);
+  if(!folderId)return new Response(JSON.stringify({ok:true,items:[]}),{headers:cors});
+  // procura subpasta <kind> dentro da pasta do aluno
+  const q="'"+folderId+"' in parents and name = '"+kind+"' and trashed = false and mimeType = 'application/vnd.google-apps.folder'";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id,name)',pageSize:'1'}),opts);
+  if(!r.ok)return new Response(JSON.stringify({ok:true,items:[],error:'HTTP '+r.status}),{headers:cors});
+  const j=await r.json();
+  if(!j.files||!j.files[0])return new Response(JSON.stringify({ok:true,items:[],message:'subpasta nao encontrada'}),{headers:cors});
+  const subId=j.files[0].id;
+  // lista arquivos dentro da subpasta
+  const q2="'"+subId+"' in parents and trashed = false";
+  const r2=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:q2,fields:'files(id,name,mimeType,modifiedTime,size)',pageSize:'100',orderBy:'modifiedTime desc'}),opts);
+  if(!r2.ok)return new Response(JSON.stringify({ok:true,items:[],error:'HTTP '+r2.status}),{headers:cors});
+  const j2=await r2.json();
+  const items=(j2.files||[]).map(f=>({
+    id:f.id,name:f.name,mimeType:f.mimeType,
+    modified:f.modifiedTime||null,size:f.size||null,
+    kind,
+    downloadUrl:'/download.aspx?id='+f.id+'&m='+(f.mimeType||'')
+  }));
+  // filtra por curso se courseKey especificado
+  const filtered=courseKey?items.filter(it=>(it.name||'').includes(courseKey)):items;
+  return new Response(JSON.stringify({ok:true,items:filtered,total:filtered.length,kind}),{headers:{...cors,'Cache-Control':'no-store'}});
+}
+
+// ═══ Helper: salva material em subpasta específica dentro da pasta do aluno ═══
+async function gdiSaveMaterialToSubfolder(gd0, folderId, kind, fileName, content){
+  // kind: 'resumos' | 'cards' | 'pilulas' | 'questoes' | 'simulados'
+  // primeiro procura/cria subpasta <kind>
+  const q="'"+folderId+"' in parents and name = '"+kind+"' and trashed = false and mimeType = 'application/vnd.google-apps.folder'";
+  const opts=await gd0.requestOptions();
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id)',pageSize:'1'}),opts);
+  let subId=null;
+  if(r.ok){const j=await r.json();if(j.files&&j.files[0])subId=j.files[0].id;}
+  if(!subId){
+    const co=await gd0.requestOptions({'Content-Type':'application/json'},'POST');
+    co.body=JSON.stringify({name:kind,mimeType:'application/vnd.google-apps.folder',parents:[folderId]});
+    const cr=await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',co);
+    if(!cr.ok)return false;
+    subId=(await cr.json()).id;
+  }
+  // upload do arquivo (multipart)
+  const boundary='gdimat'+Date.now();
+  const ct=typeof content==='string'?'text/markdown; charset=UTF-8':'application/json; charset=UTF-8';
+  const body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:fileName,parents:[subId]})+'\r\n--'+boundary+'\r\nContent-Type: '+ct+'\r\n\r\n'+(typeof content==='string'?content:JSON.stringify(content))+'\r\n--'+boundary+'--';
+  const uo=await gd0.requestOptions({'Content-Type':'multipart/related; boundary='+boundary},'POST');
+  const ur=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true',{method:'POST',headers:uo.headers,body});
+  return ur.ok;
+}
+
+
+// ── Status do batalhão: verifica se o curso já foi processado ──
+async function handleBattalionStatus(request, url){
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json;charset=UTF-8' };
+  const user = await gdiSessionUser(request);
+  if(!user) return new Response(JSON.stringify({ok:false, error:'auth'}), {status:401, headers:cors});
+  const courseKey = (url.searchParams.get('courseKey') || '').slice(0, 200);
+  if(!courseKey) return new Response(JSON.stringify({ok:false, error:'no courseKey'}), {status:400, headers:cors});
+  const gd0 = gds[0];
+  const folderId = await gdiUserFolderId(gd0);
+  if(!folderId) return new Response(JSON.stringify({ok:true, processed:false}), {headers:cors});
+  const cache = await gdiIsaCacheRead(gd0, folderId);
+  const entry = cache[courseKey];
+  return new Response(JSON.stringify({
+    ok:true,
+    processed: !!(entry && entry.battalionDone),
+    hasSummary: !!(entry && entry.summary),
+    hasQuestions: !!(entry && entry.questions),
+    date: entry && entry.battalionDate || null
+  }), {headers: {...cors, 'Cache-Control':'no-store'}});
+}
 async function handleAi(request) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json;charset=UTF-8' };
   let body;
@@ -1926,9 +2695,9 @@ async function handleAi(request) {
     if (clientHint === 0) globalThis.__NVIDIA_KEY_IDX++;
     backends.push({ name: 'NVIDIA', url: nvidiaUrl, keys: nvidiaKeys, keyIdx, models: nvidiaModels, opts: { top_p: 0.9 } });
   }
-  // 2) 智谱AI
+  // 2) Meggy AI
   const zhipuKey = globalThis.ZHIPU_API_KEY || globalThis.AI_API_KEY;
-  if (zhipuKey) { backends.push({ name: 'Zhipu', url: globalThis.ZHIPU_API_URL || 'https://open.bigmodel.cn/api/paas/v4/chat/completions', key: zhipuKey, models: [globalThis.AI_MODEL || globalThis.ZHIPU_MODEL || 'glm-4-flash'], opts: {} }); }
+  if (zhipuKey) { backends.push({ name: 'Meggy (BlackTie)', url: globalThis.ZHIPU_API_URL || 'https://open.bigmodel.cn/api/paas/v4/chat/completions', key: zhipuKey, models: [globalThis.AI_MODEL || globalThis.ZHIPU_MODEL || 'glm-4-flash'], opts: {} }); }
   // 3) CF Workers AI
   const cfAI = globalThis.AI;
   if (cfAI && typeof cfAI.run === 'function') { backends.push({ name: 'CF-Workers-AI', isCF: true, models: ['@cf/meta/llama-3.1-8b-instruct'] }); }

@@ -506,7 +506,7 @@
       answers.forEach(a=>{if(a){gradeQ(a.id,a.acertou);if(a.acertou)hits++;}});
       const total=queue.length;
         // ★ FIX: atualiza contador de simulados para conquistas
-        try{localStorage.setItem('gdi-simulados-count',String((window.gdiAchievements?window.gdiAchievements:undefined)||(lsGet('gdi-simulados-v1',[]).length)));}catch(_){}
+        try{localStorage.setItem('gdi-simulados-count',String(lsGet('gdi-simulados-v1',[]).length));}catch(_){}
       // anti-duplicação: se já existe salvo neste segundo, pula
       const recent=simus().find(s=>s.date>Date.now()-2000);
       if(!recent){
@@ -3353,7 +3353,7 @@
           const t=panel.querySelector('.gdi-central-tab[data-t=\"questoes\"]');
           if(t)t.click();
           // tenta aplicar filtro depois que Questões renderiza
-          setTimeout(()=>{try{_qFilterSubject=subj;const b=panel.querySelector('#gdi-q-subjects');if(b){const ev=new Event('click');}}catch(_){}},200);
+          setTimeout(()=>{try{_qFilterSubject=subj;const body=panel.querySelector('#gdi-central-body');if(body&&window.renderQuestoes)window.renderQuestoes(body);}catch(_){}},200);
         }
       };
     });
