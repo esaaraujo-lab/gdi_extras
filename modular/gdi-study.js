@@ -2968,7 +2968,7 @@
   }
   if(!document.getElementById('gdi-central-style')){
     const s=document.createElement('style');s.id='gdi-central-style';s.textContent=`
-/* ═══ CENTRAL DE ESTUDOS v3 — design moderno (sidebar + dashboard) ═══ */
+/* ═══ CENTRAL DE ESTUDOS v3 - Area do Aluno — design moderno (sidebar + dashboard) ═══ */
 #gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);color:var(--ferreto-text,#f3f5fa);font-family:var(--ferreto-font-body,'Rubik',sans-serif);display:none;overflow-y:auto;}
 @keyframes gdi-central-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
 .gdi-central-box{width:100%;height:100%;min-height:100vh;margin:0;padding:0;background:var(--ferreto-bg,#070910);border:0;border-radius:0;}
@@ -3102,7 +3102,7 @@
     btn.id='gdi-central-nav';
     btn.className='gdi-nav-btn';
     btn.title='Área do Aluno (tecla C)';
-    btn.innerHTML='<i class="bi bi-journal-bookmark-fill"></i><span class="d-none d-md-inline">Estudos</span>';
+    btn.innerHTML='<i class="bi bi-journal-bookmark-fill"></i><span class="d-none d-md-inline">Area do Aluno</span>';
     btn.onclick=()=>openPanel('cursos');
     // insere antes do botão de tema (se existir) ou no início
     const themeBtn=document.getElementById('theme-toggle');
