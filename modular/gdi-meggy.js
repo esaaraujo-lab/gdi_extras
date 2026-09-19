@@ -2127,7 +2127,49 @@ const MEGGY_AVATAR = `data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="
 #gdi-ai-head{display:flex;align-items:center;gap:10px;padding:14px 16px;
   background:linear-gradient(135deg,rgba(255,139,159,.18),rgba(93,222,218,.1));
   border-bottom:1px solid var(--ferreto-border,rgba(255,255,255,.09));}
+(function(){
+  if(window.__gdiAiWidget)return;window.__gdiAiWidget=true;
+
+  const MEGGY_NAME='Meggy';
+  const MEGGY_AVATAR=`data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="48" fill="%23FFF0F5" stroke="%23FFD1DC" stroke-width="2"/><path d="M 22 35 C 10 40 8 65 20 75 C 28 82 35 70 30 50 Z" fill="%23FFFFFF"/><circle cx="16" cy="52" r="9" fill="%23F0F0F0"/><circle cx="20" cy="65" r="8" fill="%23E8E8E8"/><path d="M 78 35 C 90 40 92 65 80 75 C 72 82 65 70 70 50 Z" fill="%23FFFFFF"/><circle cx="84" cy="52" r="9" fill="%23F0F0F0"/><circle cx="80" cy="65" r="8" fill="%23E8E8E8"/><ellipse cx="50" cy="52" rx="24" ry="22" fill="%23FFFFFF"/><circle cx="50" cy="26" r="13" fill="%23FFFFFF"/><circle cx="42" cy="28" r="9" fill="%23F5F5F5"/><circle cx="58" cy="28" r="9" fill="%23F5F5F5"/><circle cx="50" cy="20" r="8" fill="%23FAFAFA"/><path d="M 42 22 C 38 17 38 27 45 23 Z" fill="%23FF8B9F"/><path d="M 58 22 C 62 17 62 27 55 23 Z" fill="%23FF8B9F"/><circle cx="50" cy="22.5" r="3" fill="%23FF5E7E"/><circle cx="40" cy="46" r="3.5" fill="%232C1A1D"/><circle cx="38.8" cy="44.8" r="1.2" fill="%23FFFFFF"/><path d="M 36 43 Q 39 40 42 42" stroke="%232C1A1D" stroke-width="1" fill="none" stroke-linecap="round"/><circle cx="60" cy="46" r="3.5" fill="%232C1A1D"/><circle cx="58.8" cy="44.8" r="1.2" fill="%23FFFFFF"/><path d="M 58 42 Q 61 40 64 43" stroke="%232C1A1D" stroke-width="1" fill="none" stroke-linecap="round"/><ellipse cx="34" cy="54" rx="4" ry="2.5" fill="%23FFB6C1" opacity="0.6"/><ellipse cx="66" cy="54" rx="4" ry="2.5" fill="%23FFB6C1" opacity="0.6"/><ellipse cx="50" cy="55" rx="10" ry="7" fill="%23FAFAFA"/><path d="M 50 54 C 50 52, 46 50, 45 53 C 44 55, 47 57, 50 60 C 53 57, 56 55, 55 53 C 54 50, 50 52, 50 54 Z" fill="%237A3E3E"/><path d="M 50 60 Q 46 64 43 62" stroke="%237A3E3E" stroke-width="1.2" fill="none" stroke-linecap="round"/><path d="M 50 60 Q 54 64 57 62" stroke="%237A3E3E" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg>`;
+  const MEGGY_TAG='— a poodle tutora';
+  const ISA_SYS='Você é a Meggy — uma poodle tutora de estudos brasileira, ' +
+    'amigável, calorosa e didática (mascote do projeto, sempre acompanhada do emoji 🐩). ' +
+    'Acompanha alunos em uma plataforma de videoaulas (Google Drive Index). Responda em ' +
+    'português, de forma clara e objetiva. Ajude com dúvidas das aulas, resumos, ' +
+    'explicações e organização dos estudos. Se não souber, diga. Seja motivadora e ' +
+    'acolhedora. Use Markdown quando ajudar.';
+
+  // CSS
+  if(!document.getElementById('gdi-ai-style')){
+    const s=document.createElement('style');s.id='gdi-ai-style';s.textContent=`
+#gdi-ai-fab{position:fixed;bottom:20px;right:20px;z-index:10001;width:56px;height:56px;border-radius:50%;
+  border:0;cursor:pointer;background:linear-gradient(135deg,#ff8b9f 0%,#c026d3 55%,#5ddeda 130%);
+  color:#fff;font-size:24px;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 28px -6px rgba(255,139,159,.5),0 0 0 1px rgba(255,255,255,.12);
+  transition:transform .18s,box-shadow .18s;}
+#gdi-ai-fab:hover{transform:scale(1.08) translateY(-2px);box-shadow:0 12px 36px -6px rgba(255,139,159,.6);}
+#gdi-ai-fab .gdi-ai-fab-ico{font-size:26px;line-height:1;}
+#gdi-ai-fab-badge{position:absolute;top:-2px;right:-2px;width:16px;height:16px;border-radius:50%;
+  background:#5ddeda;border:2px solid var(--ferreto-bg,#070910);display:none;}
+#gdi-ai-fab-badge.show{display:block;animation:gdi-ai-pulse 1.6s ease infinite;}
+@keyframes gdi-ai-pulse{0%,100%{transform:scale(1);}50%{transform:scale(1.25);}}
+#gdi-ai-panel{position:fixed;bottom:88px;right:20px;z-index:10001;width:380px;max-width:calc(100vw - 32px);
+  height:540px;max-height:calc(100vh - 120px);display:none;flex-direction:column;
+  background:var(--ferreto-surface,rgba(22,27,38,.92));
+  -webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px);
+  border:1px solid var(--ferreto-border-strong,rgba(255,255,255,.16));
+  border-radius:18px;box-shadow:0 20px 60px -12px rgba(0,0,0,.6);
+  overflow:hidden;transform-origin:bottom right;animation:gdi-ai-in .22s ease;font-family:var(--ferreto-font-body,'Rubik',sans-serif);}
+@keyframes gdi-ai-in{from{opacity:0;transform:scale(.92) translateY(12px);}to{opacity:1;transform:none;}}
+#gdi-ai-panel.open{display:flex;}
+#gdi-ai-head{display:flex;align-items:center;gap:10px;padding:14px 16px;
+  background:linear-gradient(135deg,rgba(255,139,159,.18),rgba(93,222,218,.1));
+  border-bottom:1px solid var(--ferreto-border,rgba(255,255,255,.09));}
 #gdi-ai-head .gdi-ai-avatar{width:38px;height:38px;border-radius:50%;flex:none;
+  background-image:url("${MEGGY_AVATAR}");background-size:cover;background-position:center;
+  box-shadow:0 0 0 2px rgba(255,255,255,.2);}
+/* ... mantem o restante do CSS igual ... */
   background:linear-gradient(135deg,#ff8b9f,#c026d3);display:flex;align-items:center;justify-content:center;
   color:#fff;font-size:22px;line-height:1;
   box-shadow:0 0 0 2px rgba(255,255,255,.1) inset;}
