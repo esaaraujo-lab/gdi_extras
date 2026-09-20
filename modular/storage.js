@@ -199,6 +199,101 @@
     }catch(_){return [];}
   }
 
+  // ═══ PROGRESS (curso clicável) — scan + user KV + shared Drive ═══
+
+  // Escaneia curso recursivamente, devolve lista de aulas {id,name,path,type}
+  // Roda em background — não bloqueia o usuário
+  async function scanCourseProgress(coursePath){
+    try{
+      const r=await fetch('/api/courses/scan-progress',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({coursePath})
+      },{cache:'no-store'});
+      if(!r.ok)return null;
+      const d=await r.json();
+      return d&&d.ok?d:null;
+    }catch(_){return null;}
+  }
+
+  // Salva progresso do usuário no KV (privado por usuário)
+  // progress: [{path, watched:bool, lastPosition?:number}]
+  async function saveUserProgress(coursePath, progress, totalLessons){
+    try{
+      await fetch('/api/courses/user-progress',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({coursePath, progress:progress||[], totalLessons:totalLessons||0})
+      });
+    }catch(_){}
+  }
+
+  // Lê progresso do usuário no KV
+  async function getUserProgress(coursePath){
+    try{
+      const r=await fetch('/api/courses/user-progress?coursePath='+encodeURIComponent(coursePath),{cache:'no-store'});
+      if(!r.ok)return null;
+      const d=await r.json();
+      return d&&d.ok?d.progress:null;
+    }catch(_){return null;}
+  }
+
+  // Lê MD compartilhado em .meggy.ai/progress/course-<hash>.md
+  // Se existe: outro usuário já escaneou — só marcar início deste aluno
+  async function getSharedProgress(coursePath){
+    try{
+      const r=await fetch('/api/courses/shared-progress?coursePath='+encodeURIComponent(coursePath),{cache:'no-store'});
+      if(!r.ok)return null;
+      const d=await r.json();
+      return d&&d.ok?{markdown:d.markdown, hash:d.hash, fileName:d.fileName, modified:d.modified}:null;
+    }catch(_){return null;}
+  }
+
+  // Salva MD compartilhado em .meggy.ai/progress/course-<hash>.md
+  async function saveSharedProgress(coursePath, markdown){
+    try{
+      const r=await fetch('/api/courses/shared-progress',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({coursePath, markdown})
+      });
+      if(!r.ok)return false;
+      const d=await r.json();
+      return !!(d&&d.ok);
+    }catch(_){return false;}
+  }
+
+  // Helper: constrói markdown de progresso compartilhado (formato Meggy brain)
+  // Conteúdo: metadados do curso + lista de aulas + quem já estudou
+  function buildSharedProgressMarkdown(opts){
+    const {coursePath, courseName, lessons, scannedBy, scannedAt, startedBy} = opts;
+    const lines = [];
+    lines.push('# Curso: '+(courseName||coursePath));
+    lines.push('');
+    lines.push('> Memória compartilhada da Meggy — este curso já foi escaneado.');
+    lines.push('> Outros alunos que iniciarem o mesmo curso verão esta lista e não dispararão novo scan.');
+    lines.push('');
+    lines.push('**Path:** `'+coursePath+'`');
+    lines.push('**Total de aulas:** '+(lessons?lessons.length:0));
+    lines.push('**Scanned by:** '+(scannedBy||'—'));
+    lines.push('**Scanned at:** '+(scannedAt?new Date(scannedAt).toISOString():'—'));
+    lines.push('');
+    if(startedBy&&startedBy.length){
+      lines.push('## Alunos que iniciaram este curso');
+      for(const u of startedBy)lines.push('- @'+u.username+' — iniciado em '+new Date(u.startedAt).toISOString());
+      lines.push('');
+    }
+    if(lessons&&lessons.length){
+      lines.push('## Lista de aulas');
+      for(let i=0;i<lessons.length;i++){
+        const l=lessons[i];
+        lines.push((i+1)+'. ['+l.type.toUpperCase()+'] '+l.name);
+        lines.push('   - Path: `'+l.path+'`');
+      }
+      lines.push('');
+    }
+    lines.push('---');
+    lines.push('_Gerado automaticamente por Meggy (gdi_extras). Atualize apenas se a estrutura do curso mudar._');
+    return lines.join('\n');
+  }
+
   // ═══ Expõe API global ═══
   window.GDIStorage = {
     version: STORAGE_VERSION,
@@ -218,6 +313,13 @@
     // Courses
     saveCourse,
     listCourses,
+    // Course progress (novo)
+    scanCourseProgress,
+    saveUserProgress,
+    getUserProgress,
+    getSharedProgress,
+    saveSharedProgress,
+    buildSharedProgressMarkdown,
     // Battalion
     battalionStatus,
     startBattalion,

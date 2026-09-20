@@ -2706,8 +2706,8 @@
       </div>
 
       <div style="margin-bottom:18px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">Progresso do curso</b>
+        <div id="gdi-detail-progress-clickable" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;cursor:pointer;padding:4px 2px;border-radius:4px;transition:background .2s;" title="Clique para escanear todas as aulas do curso em segundo plano e salvar na sua área do aluno + memória da Meggy">
+          <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">Progresso do curso <i class="bi bi-search" style="font-size:11px;color:var(--ferreto-primary,#ff8b9f);margin-left:4px;opacity:.6;"></i></b>
           <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${c.watched}/${c.lessons.size}</span>
         </div>
         <div style="height:8px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:4px;overflow:hidden;">
@@ -2754,6 +2754,13 @@
         renderCursos(box);
       }
     };
+    // ★ Progresso clicável — dispara background scan
+    const progressClick=box.querySelector('#gdi-detail-progress-clickable');
+    if(progressClick){
+      progressClick.onmouseenter=()=>{progressClick.style.background='var(--ferreto-surface-3,rgba(255,255,255,.06))';};
+      progressClick.onmouseleave=()=>{progressClick.style.background='';};
+      progressClick.onclick=()=>window.gdiScanCourseProgressInBackground(c, box);
+    }
     // continue
     const contBtn=box.querySelector('#gdi-detail-continue');
     bestIn(c.key).then(target=>{
@@ -2796,6 +2803,111 @@
       };
     });
   }
+
+  // ═══ BACKGROUND SCAN: Progresso clicável do curso ═══
+  // Dispara quando aluno clica em "Progresso do curso"
+  // Fluxo:
+  //   1. Verifica memória compartilhada da Meggy (Drive .meggy.ai/progress/)
+  //   2. Se JÁ existe MD: marca que este aluno iniciou, NÃO reescaneia, atualiza tile
+  //   3. Se NÃO existe: escaneia Drive recursivamente, salva MD compartilhado, salva progresso no KV
+  //   4. Em ambos os casos: salva progresso do usuário no KV (privado)
+  //   5. Atualiza UI: re-renderiza detalhe + dispara evento para "área do aluno"
+  window.gdiScanCourseProgressInBackground=async function(c, box){
+    if(!c||!c.key){
+      if(window.showToast)showToast('Erro: curso inválido');
+      return;
+    }
+    if(!window.GDIStorage||!window.GDIStorage.scanCourseProgress){
+      if(window.showToast)showToast('Storage não carregado');
+      return;
+    }
+    const coursePath=c.key;
+    const courseName=cleanCourseName(coursePath)||'Curso';
+    // feedback visual imediato
+    if(window.showToast)showToast('🔍 Verificando memória da Meggy para "'+courseName+'"...',4000);
+
+    // 1) Verifica memória compartilhada primeiro
+    let shared=null;
+    try{shared=await window.GDIStorage.getSharedProgress(coursePath);}catch(_){}
+
+    if(shared&&shared.markdown){
+      // ★ Já foi escaneado por outro aluno — apenas marcar início deste
+      if(window.showToast)showToast('✓ Memória encontrada — marcando seu início (sem reprocessar)',5000);
+      // salva progresso do usuário no KV com base no estado local atual
+      const d=stateD()||{};
+      const w=(d&&d.watched)||{};
+      const watchedInCourse=Object.keys(w).filter(k=>low(k).indexOf(low(coursePath)+'/')===0||low(k)===low(coursePath));
+      const progress=watchedInCourse.map(p=>({path:p, watched:true}));
+      try{
+        await window.GDIStorage.saveUserProgress(coursePath, progress, shared.totalLessons||progress.length);
+      }catch(_){}
+      // dispara evento para área do aluno
+      try{document.dispatchEvent(new CustomEvent('gdi:progress-updated',{detail:{coursePath,courseName,fromShared:true,totalLessons:shared.totalLessons||progress.length,watched:progress.length}}));}catch(_){}
+      if(window.showToast)showToast('✓ Progresso sincronizado com a memória compartilhada',4000);
+      return;
+    }
+
+    // 2) Não existe MD compartilhado — escanear Drive recursivamente
+    if(window.showToast)showToast('📡 Escaneando Drive em segundo plano — pode levar alguns segundos...',5000);
+    let scanResult=null;
+    try{scanResult=await window.GDIStorage.scanCourseProgress(coursePath);}catch(_){}
+    if(!scanResult||!scanResult.ok){
+      if(window.showToast)showToast('⚠ Não foi possível escanear este curso. Verifique se o caminho está acessível.',6000);
+      return;
+    }
+    const lessons=scanResult.lessons||[];
+    if(!lessons.length){
+      if(window.showToast)showToast('⚠ Nenhuma aula encontrada neste curso (vídeo/PDF/áudio).',5000);
+      return;
+    }
+    // 3) Sincroniza estado local (quais aulas já foram watched)
+    const d=stateD()||{};
+    const w=(d&&d.watched)||{};
+    const progress=lessons.map(l=>({
+      path:l.path,
+      watched:!!w[low(l.path)]||!!w[l.path],
+      type:l.type
+    }));
+    const watchedCount=progress.filter(p=>p.watched).length;
+
+    // 4) Salva progresso no KV (privado deste usuário)
+    try{await window.GDIStorage.saveUserProgress(coursePath, progress, lessons.length);}catch(_){}
+
+    // 5) Salva MD compartilhado no Drive (memória Meggy)
+    const md=window.GDIStorage.buildSharedProgressMarkdown({
+      coursePath,
+      courseName,
+      lessons,
+      scannedBy:scanResult.scannedBy||'aluno',
+      scannedAt:scanResult.scannedAt||Date.now(),
+      startedBy:[]
+    });
+    try{await window.GDIStorage.saveSharedProgress(coursePath, md);}catch(_){}
+
+    // 6) Atualiza UI
+    if(window.showToast)showToast('✓ '+lessons.length+' aulas encontradas — '+watchedCount+' já vistas. Memória compartilhada criada.',6000);
+    // dispara evento para área do aluno re-renderizar tiles
+    try{document.dispatchEvent(new CustomEvent('gdi:progress-updated',{detail:{coursePath,courseName,fromShared:false,totalLessons:lessons.length,watched:watchedCount,lessons}}));}catch(_){}
+    // re-renderiza o detalhe se box existe
+    if(box&&window.gdiRerenderCourseDetail){
+      try{window.gdiRerenderCourseDetail(box, c, {lessons, watched:watchedCount, total:lessons.length});}catch(_){}
+    }
+  };
+
+  // Helper para re-renderizar detalhe do curso após scan (atualiza contador e barra)
+  window.gdiRerenderCourseDetail=function(box, c, scanData){
+    try{
+      const watchedEl=box.querySelector('[data-stat="watched"]');
+      const remainEl=box.querySelector('[data-stat="remaining"]');
+      const pctEl=box.querySelector('[data-stat="pct"]');
+      const progressFill=box.querySelector('.gdi-progress-fill')||box.querySelector('div[style*="border-radius:4px;transition:width"]');
+      if(watchedEl&&scanData.watched!==undefined)watchedEl.textContent=scanData.watched;
+      if(remainEl)remainEl.textContent=Math.max(0,(scanData.total||0)-scanData.watched);
+      const pct=scanData.total?Math.round(scanData.watched/scanData.total*100):0;
+      if(pctEl)pctEl.textContent=pct+'%';
+      if(progressFill)progressFill.style.width=pct+'%';
+    }catch(_){}
+  };
   async function renderStats(box){
     let d=stateD();
     if(!d){

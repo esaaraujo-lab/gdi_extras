@@ -1770,6 +1770,17 @@ self.addEventListener('fetch',function(e){
   if (path === '/api/courses/add' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
   if (path === '/api/courses/list' && request.method === 'GET') return handleCourseList(request, url);
   if (path === '/api/courses/list' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ SCAN PROGRESS: escaneia curso recursivamente, lista todas as aulas
+  if (path === '/api/courses/scan-progress' && request.method === 'POST') return handleCourseScanProgress(request);
+  if (path === '/api/courses/scan-progress' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ USER PROGRESS: salva/lê progresso do usuário no KV
+  if (path === '/api/courses/user-progress' && request.method === 'POST') return handleCourseSaveUserProgress(request);
+  if (path === '/api/courses/user-progress' && request.method === 'GET') return handleCourseUserProgress(request, url);
+  if (path === '/api/courses/user-progress' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ SHARED PROGRESS: MD compartilhado em .meggy.ai/progress/ (memória Meggy)
+  if (path === '/api/courses/shared-progress' && request.method === 'POST') return handleCourseSharedProgressSave(request);
+  if (path === '/api/courses/shared-progress' && request.method === 'GET') return handleCourseSharedProgressGet(request, url);
+  if (path === '/api/courses/shared-progress' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
   // ★ MATERIALS: lê materiais gerados pelo batalhão (subpastas resumos/cards/pilulas/questoes/simulados)
   if (path === '/api/materials/list' && request.method === 'GET') return handleMaterialsList(request, url);
   if (path === '/api/materials/list' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
@@ -2483,6 +2494,264 @@ async function handleCourseList(request,url){
   // retorna só cursos vinculados a este usuário OU cursos públicos (sem users definido)
   const mine=all.filter(c=>!c.users||c.users.length===0||c.users.includes(user));
   return new Response(JSON.stringify({ok:true,courses:mine,total:mine.length}),{headers:{...cors,'Cache-Control':'no-store'}});
+}
+
+// ═══ Helper: hash estável de coursePath (32-char hex) ═══
+function courseHashFromPath(coursePath){
+  // FNV-1a 64-bit → hex (estável, sem dependências)
+  let h1=0x811c9dc5>>>0, h2=0x1000193>>>0;
+  const s=String(coursePath||'');
+  for(let i=0;i<s.length;i++){
+    const c=s.charCodeAt(i);
+    h1=Math.imul(h1^c, 0x1000193)>>>0;
+    h2=Math.imul(h2^c, 0x1000193)>>>0;
+  }
+  // mistura final
+  h1=(Math.imul(h1^(h1>>>15), 0x85ebca6b)^Math.imul(h2, 0xc2b2ae35))>>>0;
+  h2=(Math.imul(h2^(h2>>>13), 0xc2b2ae35)^Math.imul(h1, 0x85ebca6b))>>>0;
+  return ('00000000'+h1.toString(16)).slice(-8)+('00000000'+h2.toString(16)).slice(-8);
+}
+
+// ═══ Helper: traduz coursePath do formato do navegador para o formato Drive ═══
+// Recebe ex: /7:/TJ SP - Black Edition/3 - Bloco II (44%)/Direito Processual Civil...
+// Precisa: driveIndex=7, caminho=/TJ SP - Black Edition/...
+function parseCoursePath(coursePath){
+  const m=String(coursePath||'').match(/^\/(\d+):\/?(.*)$/);
+  if(!m)return null;
+  return {driveIndex:parseInt(m[1],10), subPath:m[2]||''};
+}
+
+// ═══ Helper: percorre pasta do curso recursivamente, coleta aulas (vídeos/PDFs) ═══
+async function gdiScanCourseLessons(gd, folderId, currentPath, accumulated, depth){
+  if(depth>8)return; // limite de profundidade
+  const opts=await gd.requestOptions();
+  const q="'"+folderId+"' in parents and trashed = false";
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id,name,mimeType)',pageSize:'200'}),opts);
+  if(!r.ok)return;
+  const j=await r.json();
+  if(!j.files||!j.files.length)return;
+  for(const f of j.files){
+    const nm=f.name||'';
+    const isFolder=f.mimeType==='application/vnd.google-apps.folder';
+    const childPath=currentPath?currentPath+'/'+nm:nm;
+    if(isFolder){
+      // recursão
+      await gdiScanCourseLessons(gd, f.id, childPath, accumulated, depth+1);
+    }else{
+      // é arquivo — verificar se é aula (vídeo/PDF)
+      const ext=nm.split('.').pop().toLowerCase();
+      const isVideo=/^video\/(mp4|webm|mkv|x-matroska|quicktime|x-msvideo|mpegurl|mp2t)/.test(f.mimeType||'');
+      const isPdf=ext==='pdf'||(f.mimeType||'')==='application/pdf';
+      const isMp3=(f.mimeType||'').startsWith('audio/');
+      if(isVideo||isPdf||isMp3){
+        accumulated.push({
+          id:f.id,
+          name:nm,
+          path:'/'+gd.index+':/'+childPath,
+          type:isVideo?'video':(isPdf?'pdf':'audio'),
+          mimeType:f.mimeType
+        });
+      }
+    }
+  }
+}
+
+// ═══ SCAN PROGRESS: lista todas as aulas do curso recursivamente ═══
+async function handleCourseScanProgress(request){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  let body;
+  try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:cors});}
+  const coursePath=String(body.coursePath||'').slice(0,500);
+  if(!coursePath)return new Response(JSON.stringify({ok:false,error:'no coursePath'}),{status:400,headers:cors});
+  const parsed=parseCoursePath(coursePath);
+  if(!parsed)return new Response(JSON.stringify({ok:false,error:'invalid coursePath format'}),{status:400,headers:cors});
+  // encontra o drive
+  const gd=gds[parsed.driveIndex]||gds[0];
+  if(!gd)return new Response(JSON.stringify({ok:false,error:'no drive bound'}),{status:502,headers:cors});
+  // resolve o ID da pasta raiz do curso a partir do caminho
+  // o caminho pode ter subpastas — precisa navegar
+  const subParts=parsed.subPath.split('/').filter(Boolean);
+  if(!subParts.length){
+    return new Response(JSON.stringify({ok:false,error:'coursePath must include a subfolder'}),{status:400,headers:cors});
+  }
+  // começa pelo ID da raiz do drive
+  let currentFolderId=gd.rid||gd.rootId||await gdiUserFolderId(gd);
+  if(!currentFolderId){
+    // fallback: tenta listar /drive root
+    const opts=await gd.requestOptions();
+    const rr=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:"name='root' and trashed=false",fields:'files(id)',pageSize:'1'}),opts);
+    if(rr.ok){const j=await rr.json();if(j.files&&j.files[0])currentFolderId=j.files[0].id;}
+  }
+  if(!currentFolderId)return new Response(JSON.stringify({ok:false,error:'cannot resolve drive root'}),{status:502,headers:cors});
+  // navega subpasta por subpasta
+  for(const part of subParts){
+    const opts=await gd.requestOptions();
+    const q="'"+currentFolderId+"' in parents and name = '"+part.replace(/'/g,"\\'")+"' and trashed = false";
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q,fields:'files(id,mimeType)',pageSize:'1'}),opts);
+    if(!r.ok)return new Response(JSON.stringify({ok:false,error:'drive lookup failed at: '+part,code:'HTTP '+r.status}),{status:502,headers:cors});
+    const j=await r.json();
+    if(!j.files||!j.files[0])return new Response(JSON.stringify({ok:false,error:'not found: '+part}),{status:404,headers:cors});
+    currentFolderId=j.files[0].id;
+  }
+  // agora currentFolderId é a pasta do curso — escaneia recursivamente
+  const lessons=[];
+  await gdiScanCourseLessons(gd, currentFolderId, '', lessons, 0);
+  return new Response(JSON.stringify({
+    ok:true,
+    coursePath,
+    courseHash:courseHashFromPath(coursePath),
+    lessons,
+    total:lessons.length,
+    scannedAt:Date.now(),
+    scannedBy:user
+  }),{headers:{...cors,'Cache-Control':'no-store'}});
+}
+
+// ═══ USER PROGRESS (KV): salva progresso do aluno para um curso ═══
+async function handleCourseSaveUserProgress(request){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  let body;
+  try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:cors});}
+  const coursePath=String(body.coursePath||'').slice(0,500);
+  const progress=Array.isArray(body.progress)?body.progress:[]; // [{path, watched:bool, lastPosition?}]
+  const totalLessons=parseInt(body.totalLessons||'0',10);
+  if(!coursePath)return new Response(JSON.stringify({ok:false,error:'no coursePath'}),{status:400,headers:cors});
+  const hash=courseHashFromPath(coursePath);
+  const key='progress:'+user+':'+hash;
+  const data={
+    user,coursePath,courseHash:hash,
+    progress,totalLessons,
+    updatedAt:Date.now()
+  };
+  if(typeof ENV!=='undefined'&&ENV){
+    try{await ENV.put(key, JSON.stringify(data), {expirationTtl: 90*24*3600});}catch(_){}
+  }
+  return new Response(JSON.stringify({ok:true,key,hash}),{headers:cors});
+}
+
+// ═══ USER PROGRESS (KV): lê progresso do aluno para um curso ═══
+async function handleCourseUserProgress(request, url){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  const coursePath=String(url.searchParams.get('coursePath')||'').slice(0,500);
+  if(!coursePath)return new Response(JSON.stringify({ok:false,error:'no coursePath'}),{status:400,headers:cors});
+  const hash=courseHashFromPath(coursePath);
+  const key='progress:'+user+':'+hash;
+  if(typeof ENV!=='undefined'&&ENV){
+    try{
+      const raw=await ENV.get(key, {cacheTtl: 300}); // 5 min edge cache
+      if(raw)return new Response(JSON.stringify({ok:true,progress:JSON.parse(raw)}),{headers:cors});
+    }catch(_){}
+  }
+  return new Response(JSON.stringify({ok:true,progress:null}),{headers:cors});
+}
+
+// ═══ SHARED PROGRESS (Drive .meggy.ai/progress/): salva MD compartilhado ═══
+async function handleCourseSharedProgressSave(request){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  let body;
+  try{body=await request.json();}catch(_){return new Response(JSON.stringify({ok:false,error:'invalid json'}),{status:400,headers:cors});}
+  const coursePath=String(body.coursePath||'').slice(0,500);
+  const markdown=String(body.markdown||'').slice(0, 1024*1024);
+  if(!coursePath||!markdown)return new Response(JSON.stringify({ok:false,error:'missing coursePath or markdown'}),{status:400,headers:cors});
+  const hash=courseHashFromPath(coursePath);
+  const fileName='course-'+hash+'.md';
+  const gd0=gds[0];
+  if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
+  const userFolderId=await gdiUserFolderId(gd0);
+  if(!userFolderId)return new Response(JSON.stringify({ok:false,error:'no folder'}),{status:502,headers:cors});
+  // procura/cria .meggy.ai/progress/
+  const opts=await gd0.requestOptions();
+  const qMega="'"+userFolderId+"' in parents and name = '.meggy.ai' and trashed = false and mimeType = 'application/vnd.google-apps.folder'";
+  const rMega=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:qMega,fields:'files(id)',pageSize:'1'}),opts);
+  let megaId=null;
+  if(rMega.ok){const j=await rMega.json();if(j.files&&j.files[0])megaId=j.files[0].id;}
+  if(!megaId){
+    // cria .meggy.ai
+    const boundary='meggy'+Date.now();
+    const mp='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:'.meggy.ai',mimeType:'application/vnd.google-apps.folder',parents:[userFolderId]})+'\r\n--'+boundary+'--';
+    const co=await gd0.requestOptions({'Content-Type':'multipart/related; boundary='+boundary},'POST');
+    const cr=await fetch('https://www.googleapis.com/drive/v3/files?uploadType=multipart&supportsAllDrives=true',{method:'POST',headers:co.headers,body:mp});
+    if(cr.ok){const cj=await cr.json();if(cj&&cj.id)megaId=cj.id;}
+  }
+  if(!megaId)return new Response(JSON.stringify({ok:false,error:'cannot create/find .meggy.ai'}),{status:502,headers:cors});
+  // procura/cria subpasta "progress"
+  const qProg="'"+megaId+"' in parents and name = 'progress' and trashed = false and mimeType = 'application/vnd.google-apps.folder'";
+  const rProg=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:qProg,fields:'files(id)',pageSize:'1'}),opts);
+  let progId=null;
+  if(rProg.ok){const j=await rProg.json();if(j.files&&j.files[0])progId=j.files[0].id;}
+  if(!progId){
+    const boundary='prog'+Date.now();
+    const mp='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:'progress',mimeType:'application/vnd.google-apps.folder',parents:[megaId]})+'\r\n--'+boundary+'--';
+    const co=await gd0.requestOptions({'Content-Type':'multipart/related; boundary='+boundary},'POST');
+    const cr=await fetch('https://www.googleapis.com/drive/v3/files?uploadType=multipart&supportsAllDrives=true',{method:'POST',headers:co.headers,body:mp});
+    if(cr.ok){const cj=await cr.json();if(cj&&cj.id)progId=cj.id;}
+  }
+  if(!progId)return new Response(JSON.stringify({ok:false,error:'cannot create/find .meggy.ai/progress'}),{status:502,headers:cors});
+  // upsert fileName
+  const qFile="'"+progId+"' in parents and name = '"+fileName+"' and trashed = false";
+  const rFile=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:qFile,fields:'files(id)',pageSize:'1'}),opts);
+  let existingId=null;
+  if(rFile.ok){const j=await rFile.json();if(j.files&&j.files[0])existingId=j.files[0].id;}
+  if(existingId){
+    // atualiza — mas só se o conteúdo for diferente (evita re-gravação redundante)
+    const po=await gd0.requestOptions({'Content-Type':'text/markdown; charset=UTF-8'},'PATCH');
+    const pr=await fetch("https://www.googleapis.com/upload/drive/v3/files/"+existingId+"?uploadType=media&supportsAllDrives=true",{method:'PATCH',headers:po.headers,body:markdown});
+    return new Response(JSON.stringify({ok:true,fileId:existingId,updated:true}),{headers:cors});
+  }
+  // cria novo
+  const boundary='csp'+Date.now();
+  const mp='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:fileName,parents:[progId]})+'\r\n--'+boundary+'\r\nContent-Type: text/markdown; charset=UTF-8\r\n\r\n'+markdown+'\r\n--'+boundary+'--';
+  const co=await gd0.requestOptions({'Content-Type':'multipart/related; boundary='+boundary},'POST');
+  const cr=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true',{method:'POST',headers:co.headers,body:mp});
+  if(cr.ok){const cj=await cr.json();return new Response(JSON.stringify({ok:true,fileId:cj&&cj.id,created:true}),{headers:cors});}
+  return new Response(JSON.stringify({ok:false,error:'upload failed'}),{status:502,headers:cors});
+}
+
+// ═══ SHARED PROGRESS (Drive .meggy.ai/progress/): lê MD compartilhado ═══
+async function handleCourseSharedProgressGet(request, url){
+  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
+  const user=await gdiSessionUser(request);
+  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
+  const coursePath=String(url.searchParams.get('coursePath')||'').slice(0,500);
+  if(!coursePath)return new Response(JSON.stringify({ok:false,error:'no coursePath'}),{status:400,headers:cors});
+  const hash=courseHashFromPath(coursePath);
+  const fileName='course-'+hash+'.md';
+  const gd0=gds[0];
+  if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
+  const userFolderId=await gdiUserFolderId(gd0);
+  if(!userFolderId)return new Response(JSON.stringify({ok:true,markdown:null,message:'no folder'}),{headers:cors});
+  // procura .meggy.ai/progress/<fileName>
+  const opts=await gd0.requestOptions();
+  const qMega="'"+userFolderId+"' in parents and name = '.meggy.ai' and trashed = false and mimeType = 'application/vnd.google-apps.folder'";
+  const rMega=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:qMega,fields:'files(id)',pageSize:'1'}),opts);
+  if(!rMega.ok)return new Response(JSON.stringify({ok:true,markdown:null}),{headers:cors});
+  const jMega=await rMega.json();
+  if(!jMega.files||!jMega.files[0])return new Response(JSON.stringify({ok:true,markdown:null}),{headers:cors});
+  const megaId=jMega.files[0].id;
+  const qProg="'"+megaId+"' in parents and name = 'progress' and trashed = false and mimeType = 'application/vnd.google-apps.folder'";
+  const rProg=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:qProg,fields:'files(id)',pageSize:'1'}),opts);
+  if(!rProg.ok)return new Response(JSON.stringify({ok:true,markdown:null}),{headers:cors});
+  const jProg=await rProg.json();
+  if(!jProg.files||!jProg.files[0])return new Response(JSON.stringify({ok:true,markdown:null}),{headers:cors});
+  const progId=jProg.files[0].id;
+  const qFile="'"+progId+"' in parents and name = '"+fileName+"' and trashed = false";
+  const rFile=await fetch('https://www.googleapis.com/drive/v3/files?'+enQuery({includeItemsFromAllDrives:'true',supportsAllDrives:'true',q:qFile,fields:'files(id,modifiedTime)',pageSize:'1'}),opts);
+  if(!rFile.ok)return new Response(JSON.stringify({ok:true,markdown:null}),{headers:cors});
+  const jFile=await rFile.json();
+  if(!jFile.files||!jFile.files[0])return new Response(JSON.stringify({ok:true,markdown:null}),{headers:cors});
+  const fileId=jFile.files[0].id;
+  const fr=await fetch("https://www.googleapis.com/drive/v3/files/"+fileId+"?alt=media&supportsAllDrives=true",opts);
+  if(!fr.ok)return new Response(JSON.stringify({ok:false,error:'download failed'}),{status:502,headers:cors});
+  const md=await fr.text();
+  return new Response(JSON.stringify({ok:true,markdown:md,fileId,modified:jFile.files[0].modifiedTime,hash,fileName}),{headers:{...cors,'Cache-Control':'no-store'}});
 }
 
 // ═══ MATERIALS — lê materiais gerados pelo batalhão nas subpastas do aluno ═══
