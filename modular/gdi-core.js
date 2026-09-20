@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 // gdi-core.js — Bootstrap + M1-M7 + M9 (materiais)
-//
+// 
 // Módulo base do GDI Extras. Define:
 //   • window.GDI_MODULES (array de módulos)
 //   • Bus (event bus global)
@@ -10,40 +10,6 @@
 //
 // Deve ser carregado PRIMEIRO no loader.html
 // ═══════════════════════════════════════════════════════════════
-
-// ═══ Bus stub (fallback quando app.min.js não carregou ou não tem Bus) ═══
-// Garante que Bus.onGlobal / Bus.emit sempre existem — evita ReferenceError
-(function(){
-  if(typeof window.Bus!=='undefined'&&window.Bus&&typeof window.Bus.onGlobal==='function')return;
-  console.log('[GDI] Criando stub de Bus (app.min.js não forneceu Bus próprio)');
-  const _listeners={};
-  window.Bus={
-    onGlobal:function(event,handler){
-      if(!_listeners[event])_listeners[event]=[];
-      _listeners[event].push(handler);
-      return function(){
-        if(!_listeners[event])return;
-        const idx=_listeners[event].indexOf(handler);
-        if(idx>=0)_listeners[event].splice(idx,1);
-      };
-    },
-    offGlobal:function(event,handler){
-      if(!_listeners[event])return;
-      const idx=_listeners[event].indexOf(handler);
-      if(idx>=0)_listeners[event].splice(idx,1);
-    },
-    emit:function(event){
-      if(!_listeners[event])return;
-      const args=Array.prototype.slice.call(arguments,1);
-      _listeners[event].forEach(h=>{try{h.apply(null,args);}catch(e){console.warn('[Bus stub] handler falhou em '+event,e);}});
-    },
-    emitGlobal:function(event){
-      // alias de emit
-      return window.Bus.emit.apply(window.Bus,arguments);
-    }
-  };
-})();
-
 
 /* ═══════════════════════════════════════════════════════════════
    gdi-extras.js v2.6-fix — COMPLETO

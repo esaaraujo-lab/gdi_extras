@@ -48,25 +48,11 @@
     </div>
   </div>
 </div>`;
-    // ★ Vanilla DOM (sem jQuery) — drops 30KB do bundle inicial
-    const contentEl=document.getElementById('content');
-    if(contentEl)contentEl.innerHTML=l;
+    $("#content").html(l);
     let d=null,o=1,s=1;
     function r(){
       const p=document.getElementById("pdf-canvas"),g=p.getContext("2d");
       pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
-      function showSpinner(){
-        const s=document.getElementById("pdf-spinner");
-        if(s)s.style.display='';
-      }
-      function hideSpinner(){
-        const s=document.getElementById("pdf-spinner");
-        if(s)s.style.display='none';
-      }
-      function setSpinnerHTML(html){
-        const s=document.getElementById("pdf-spinner");
-        if(s)s.innerHTML=html;
-      }
       function f(u){
         // ★ mobile: ajusta escala automaticamente à largura do container
         const containerW=p.parentElement.clientWidth-32;
@@ -79,7 +65,7 @@
           const m=h.getViewport({scale});
           p.height=m.height,p.width=m.width,
           h.render({canvasContext:g,viewport:m}).promise.then(function(){
-            hideSpinner();
+            $("#pdf-spinner").hide();
           }),
           document.getElementById("pdf-page-num").textContent=u;
         });
@@ -87,10 +73,10 @@
       pdfjsLib.getDocument(n).promise.then(function(u){
         d=u,document.getElementById("pdf-page-count").textContent=u.numPages,f(o);
       }).catch(function(u){
-        setSpinnerHTML(`<div class="gdi-alert gdi-alert-error">Could not load PDF: ${u.message}</div>`);
+        $("#pdf-spinner").html(`<div class="gdi-alert gdi-alert-error">Could not load PDF: ${u.message}</div>`);
       }),
-      document.getElementById("pdf-prev").addEventListener("click",function(){if(o>1){o--;showSpinner();f(o);}}),
-      document.getElementById("pdf-next").addEventListener("click",function(){if(d&&o<d.numPages){o++;showSpinner();f(o);}});
+      document.getElementById("pdf-prev").addEventListener("click",function(){o>1&&(o--,$("#pdf-spinner").show(),f(o))}),
+      document.getElementById("pdf-next").addEventListener("click",function(){d&&o<d.numPages&&(o++,$("#pdf-spinner").show(),f(o))});
       // ★ debounce no zoom (evita re-render a cada pixel do slider)
       let _zoomTimer=null;
       document.getElementById("pdf-zoom").addEventListener("input",function(){
@@ -100,19 +86,13 @@
         _zoomTimer=setTimeout(()=>{f(o);_zoomTimer=null;},150);
       });
     }
-    // ★ Fix: typeof pdfjsLib === 'undefined' (antes era <"u", ilegível)
-    if(typeof pdfjsLib==='undefined'){
+    if(typeof pdfjsLib<"u")r();
+    else{
       const p=document.createElement("script");
-      p.src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js";
-      p.onload=r;
-      p.onerror=function(){setSpinnerHTML_safe();};
-      function setSpinnerHTML_safe(){
-        const s=document.getElementById("pdf-spinner");
-        if(s)s.innerHTML='<div class="gdi-alert gdi-alert-error">Failed to load PDF viewer.</div>';
-      }
+      p.src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
+      p.onload=r,
+      p.onerror=function(){$("#pdf-spinner").html('<div class="gdi-alert gdi-alert-error">Failed to load PDF viewer.</div>')},
       document.head.appendChild(p);
-    }else{
-      r();
     }
   };
 })();
