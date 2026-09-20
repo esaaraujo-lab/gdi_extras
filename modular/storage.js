@@ -31,8 +31,92 @@
         body:JSON.stringify({path:fullPath})
       });
       if(r.ok){const d=await r.json();if(d&&d.ok&&d.shortUrl)return d.shortUrl;}
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
     return fullPath;
+  }
+
+  // ═══ AUTO-ENCURTAR URL: substitui a URL longa por /f/<id> na address bar ═══
+  // Roda em background após cada navegação. Não recarrega a página.
+  // Usa history.replaceState — instantâneo, transparente para o usuário.
+  let _urlReplaceTimer=null;
+  let _urlReplaceInProgress=false;
+
+  async function replaceUrlWithShort(){
+    if(_urlReplaceInProgress)return;
+    const path=window.location.pathname;
+    const search=window.location.search;
+    const hash=window.location.hash;
+
+    // Skip se já é URL curta
+    if(path.startsWith('/f/'))return;
+    // Skip homepage
+    if(path==='/'||path==='')return;
+    // Skip auth/admin routes
+    if(/^\/(login|signup|logout|admin|google_callback)/.test(path))return;
+    // Skip API/download routes
+    if(path.startsWith('/api/')||path.startsWith('/download.aspx'))return;
+    // Skip modular/sw.js routes
+    if(path.startsWith('/modular/')||/^\/(sw\.js|app\.min\.js|gdi-extras\.js)$/.test(path))return;
+    // Skip fallback route
+    if(path.startsWith('/fallback'))return;
+    // Skip findpath/id2path/quota/search commands
+    if(/^\/\d+:(search|id2path|findpath|quota|fallback)/.test(path))return;
+    // Só encurta URLs que são /<n>:/<path> (folders e files)
+    if(!/^\/\d+:\//.test(path))return;
+
+    _urlReplaceInProgress=true;
+    try{
+      const shortUrl=await getShortUrl(path);
+      if(shortUrl&&shortUrl.indexOf('/f/')===0){
+        // Mantém search (?a=view) e hash (#xxx) originais
+        const newUrl=shortUrl+search+hash;
+        // Só substitui se ainda estamos na mesma página (usuário pode ter navegado)
+        if(window.location.pathname===path){
+          history.replaceState({},'',newUrl);
+          console.log('[GDI] URL encurtada:',path,'→',newUrl);
+        }
+      }
+    }catch(e){
+      console.warn('[GDIStorage] replaceUrlWithShort falhou:',e.message||e);
+    }finally{
+      _urlReplaceInProgress=false;
+    }
+  }
+
+  // Schedule replaceUrlWithShort com debounce
+  function scheduleUrlReplace(){
+    if(_urlReplaceTimer)clearTimeout(_urlReplaceTimer);
+    _urlReplaceTimer=setTimeout(replaceUrlWithShort,500);
+  }
+
+  // Auto-run em page load + observa navegações (history.pushState/replaceState)
+  function setupAutoUrlShortener(){
+    if(document.readyState==='loading'){
+      document.addEventListener('DOMContentLoaded',scheduleUrlReplace);
+    }else{
+      scheduleUrlReplace();
+    }
+    // Intercepta pushState (app.min.js faz para navegação SPA)
+    const origPush=history.pushState;
+    history.pushState=function(){
+      const ret=origPush.apply(this,arguments);
+      scheduleUrlReplace();
+      return ret;
+    };
+    // Detecta navegação por popstate (back/forward)
+    window.addEventListener('popstate',scheduleUrlReplace);
+    // Fallback: polling de mudança de URL
+    let _lastUrl=window.location.href;
+    setInterval(()=>{
+      if(window.location.href!==_lastUrl){
+        _lastUrl=window.location.href;
+        scheduleUrlReplace();
+      }
+    },1000);
+    // Evento custom do GDI (se Bus existir)
+    if(window.Bus&&typeof window.Bus.onGlobal==='function'){
+      window.Bus.onGlobal('page:change',scheduleUrlReplace);
+    }
   }
 
   // Hash curto de lessonKey (estável, 8 chars)
@@ -70,7 +154,7 @@
     try{
       await fetch('/api/ai/cache',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({key:lessonKey,...data})});
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
   }
 
   // Lista todo o cache ISA (para recuperar resumos que sumiram do localStorage)
@@ -88,7 +172,7 @@
     try{
       await fetch('/api/materials/save',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({coursePath,pdfName,kind,content})});
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
   }
 
   // Verifica se material já existe (cache hit)
@@ -119,7 +203,7 @@
     try{
       await fetch('/api/courses/add',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({coursePath,courseName,pdfCount:pdfCount||0,addedAt:Date.now()})});
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
   }
 
   // Lista cursos do aluno
@@ -156,7 +240,7 @@
     try{
       await fetch('/api/brain/save',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({fileName,markdown})});
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
   }
 
   // Lista memória da Meggy
@@ -176,7 +260,7 @@
     try{
       await fetch('/api/ai/essay/save',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({markdown,banca,tipo,score})});
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
   }
 
   // Salva flashcard compartilhado
@@ -184,7 +268,7 @@
     try{
       await fetch('/api/ai/shared-flashcards',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(card)});
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
   }
 
   // Lista flashcards compartilhados
@@ -223,7 +307,7 @@
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({coursePath, progress:progress||[], totalLessons:totalLessons||0})
       });
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
   }
 
   // Lê progresso do usuário no KV
@@ -302,6 +386,10 @@
     getShortUrl,
     shortLessonKey,
     materialFileName,
+    // Auto URL shortener (novo)
+    replaceUrlWithShort,
+    scheduleUrlReplace,
+    setupAutoUrlShortener,
     // ISA cache
     isaCacheGet,
     isaCacheSet,
@@ -347,9 +435,16 @@
           return short + (short.includes('?')?'&':'?') + 'a=view';
         }
       }
-    }catch(_){}
+    }catch(e){console.warn('[GDIStorage]',e.message||e);}
     return t + (t.includes('?')?'&':'?') + 'a=view';
   };
 
   console.log('[GDI Storage] Drive v1 carregado');
+
+  // ★ Auto-ativar URL shortener em background (não bloqueia o carregamento)
+  try{
+    setupAutoUrlShortener();
+  }catch(e){
+    console.warn('[GDI Storage] setupAutoUrlShortener falhou:',e);
+  }
 })();
