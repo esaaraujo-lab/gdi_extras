@@ -1,6 +1,4 @@
 // ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
 // gdi-study.js — Central de Estudos + Estudo Ativo + Visual
 // 
 // Módulos:
@@ -505,8 +503,6 @@
       let hits=0;
       answers.forEach(a=>{if(a){gradeQ(a.id,a.acertou);if(a.acertou)hits++;}});
       const total=queue.length;
-        // ★ FIX: atualiza contador de simulados para conquistas
-        try{localStorage.setItem('gdi-simulados-count',String((window.gdiAchievements?window.gdiAchievements:undefined)||(lsGet('gdi-simulados-v1',[]).length)));}catch(_){}
       // anti-duplicação: se já existe salvo neste segundo, pula
       const recent=simus().find(s=>s.date>Date.now()-2000);
       if(!recent){
@@ -650,9 +646,42 @@
   // ★ Expõe startSession no window para que o M9-ISA (botão "Resolver
   // agora →" após gerar questões) possa chamar a sessão interativa
   // diretamente sobre o bodyEl da aula, sem precisar abrir a Central.
-  
+  window.__gdiStartSession=startSession;
   // ★ Expõe gradeQ para o quiz do M9-ISA (interativo na aba de questões)
   window.__gdiGradeQ=gradeQ;
+  // ★ Expõe gradeQ para outros módulos (ex.: flashcards das erradas)
+  window.__gdiQStats=function(){
+    // retorna {perSubject:[{subject,total,hits,misses,acc}], worst:[...], overall:{...}}
+    const all=questions();
+    const srs=qSrs();
+    const bySbj={};
+    all.forEach(q=>{
+      const s=(q.subject||'—');
+      if(!bySbj[s])bySbj[s]={subject:s,total:0,hits:0,misses:0};
+      bySbj[s].total++;
+      // se a questão tem SRS, contamos como "respondida"
+      const e=srs[q.id];
+      if(e&&e.last){
+        if(e.box>0)bySbj[s].hits++; // simplificação: box>0 = acertou última
+        else bySbj[s].misses++;
+      }
+    });
+    const perSubject=Object.values(bySbj).map(x=>{
+      const answered=x.hits+x.misses;
+      x.answered=answered;
+      x.acc=answered?Math.round(x.hits/answered*100):null;
+      return x;
+    });
+    perSubject.sort((a,b)=>(a.acc==null?101:a.acc)-(b.acc==null?101:b.acc));
+    const overall={
+      total:all.length,
+      answered:perSubject.reduce((s,x)=>s+x.answered,0),
+      hits:perSubject.reduce((s,x)=>s+x.hits,0),
+      misses:perSubject.reduce((s,x)=>s+x.misses,0)
+    };
+    overall.acc=overall.answered?Math.round(overall.hits/overall.answered*100):null;
+    return {perSubject,overall,worst:perSubject.filter(x=>x.acc!=null&&x.acc<60)};
+  };
 
   console.log('[GDI Extras] M23 Estudo Ativo (questões/simulado/cronograma/revisões) ativo');
 })();
@@ -679,7 +708,7 @@
   // Inline onclick chama window.gdiAddCourseFromButton(this); addEventListener no document
   // também captura cliques (fallback caso CSP bloqueie inline handlers).
   window.gdiAddCourseFromButton=async function(btn){
-    
+    console.log('[AddCourse] ★ gdiAddCourseFromButton CHAMADO | btn:',btn);
     if(!btn){
       console.error('[AddCourse] botão null');
       return;
@@ -687,7 +716,7 @@
     const p=btn.dataset.path||'';
     const n=btn.dataset.name||'Pasta';
     const pdfs=parseInt(btn.dataset.pdfs||'0',10);
-    
+    console.log('[AddCourse] dataset | path:',p,'| name:',n,'| pdfs:',pdfs);
     if(!p){
       console.error('[AddCourse] data-path vazio — abortando');
       if(window.showToast)showToast('Erro: pasta não selecionada');
@@ -702,7 +731,8 @@
     try{
       // ★ 2) chamar persistência — função global self-contained
       await window.gdiAddCourseFromDrive(p, n, pdfs);
-          }catch(err){
+      console.log('[AddCourse] ★ curso adicionado com sucesso');
+    }catch(err){
       console.error('[AddCourse] ERRO:',err);
       if(window.showToast)showToast('Erro: '+err.message);
       // restaura botão em caso de erro
@@ -722,7 +752,7 @@
   //   5. Dispara batalhão em background (não-bloqueante) → cria materiais em subpastas:
   //      resumos/, cards/, pilulas/, questoes/, simulados/ dentro da pasta do aluno no Drive
   window.gdiAddCourseFromDrive=async function(coursePath, courseName, pdfCount){
-    
+    console.log('[AddCourse] gdiAddCourseFromDrive iniciado:',coursePath,'|',courseName);
     const overlay=document.querySelector('.gdi-modal-overlay');
     const box=document.getElementById('gdi-central-body');
     const LS_MANUAL='gdi-manual-courses-v1';
@@ -742,8 +772,10 @@
           manual:true,path:coursePath,courseKey:coursePath
         });
         lsSet(LS_MANUAL,manual);
-              }else{
-              }
+        console.log('[AddCourse] ★ curso SALVO no localStorage (rápido)');
+      }else{
+        console.log('[AddCourse] curso já existe no localStorage — vai apenas fechar e disparar batalhão');
+      }
 
       // ★ 2) POST /api/courses/add — salva em general_courses.json no Drive (compartilhado)
       // Não-bloqueante: se falhar, mostra warning mas continua o fluxo
@@ -759,7 +791,7 @@
         });
         if(r.ok){
           const d=await r.json().catch(()=>({}));
-          
+          console.log('[AddCourse] ★ salvo em general_courses.json no Drive | resposta:',d);
         }else{
           console.warn('[AddCourse] /api/courses/add HTTP',r.status,'— continuando mesmo assim');
         }
@@ -777,16 +809,19 @@
         try{
           if(typeof window.gdiRefreshCentralPanel==='function'){
             window.gdiRefreshCentralPanel();
-                      }else if(typeof window.renderCursos==='function'){
+            console.log('[AddCourse] ★ painel re-renderizado');
+          }else if(typeof window.renderCursos==='function'){
             window.renderCursos(box);
-                      }
+            console.log('[AddCourse] ★ renderCursos() chamado');
+          }
         }catch(e){console.warn('[AddCourse] erro ao re-renderizar:',e.message);}
       }
 
       // ★ 5) fecha modal — agora que tudo está salvo
       if(overlay&&overlay.parentNode){
         overlay.remove();
-              }
+        console.log('[AddCourse] ★ modal fechado');
+      }
 
       // ★ 6) dispara batalhão em background (não-bloqueante)
       // O batalhão no worker vai:
@@ -799,12 +834,14 @@
       //     • questoes/<course>_<date>.json    → aba Questões
       //     • simulados/<course>_<date>.json  → aba Simulados
       //   - também salva em pool compartilhado (outros alunos com mesmo curso = cache hit)
-            try{
+      console.log('[AddCourse] disparando batalhão em background...');
+      try{
         if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
           window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
             console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
           });
-                  }else{
+          console.log('[AddCourse] ★ batalhão disparado — vai gerar materiais em subpastas');
+        }else{
           console.warn('[AddCourse] gdiIsaPdf.startBattalion indisponível — batalhão não disparado');
         }
       }catch(e){console.warn('[Batalhão] falha:',e.message);}
@@ -829,12 +866,14 @@
       // só captura se o target for o botão Selecionar
       const btn=e.target.closest && e.target.closest('#gdi-amc-select-current');
       if(!btn)return;
-            e.preventDefault();
+      console.log('[AddCourse] ★ clique capturado via document delegation');
+      e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
       if(window.gdiAddCourseFromButton)window.gdiAddCourseFromButton(btn);
     },true);  // capture phase
-      }
+    console.log('[GDI M22] event delegation global para #gdi-amc-select-current atachado');
+  }
 
   let rescue=null,rescueAt=0;
   function ensureState(){
@@ -1068,7 +1107,7 @@
     // streak
     const watch=lsGet(LS_WATCH,{});
     const acts={};const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
-    for(const k in watch){const v=watch[k];if(typeof v==='number'&&v>60)touch(new Date(k+'T12:00:00').getTime());else if(v&&v.at)touch(v.at);}
+    for(const k in watch)touch(watch[k]&&watch[k].at);
     let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
     if(!has(dd))dd.setDate(dd.getDate()-1);
     while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
@@ -1093,7 +1132,6 @@
         {id:'trails',icon:'bi-signpost-2',label:'Trilhas'}
       ]},
       {label:'Materiais',tabs:[
-        {id:'addmateria',icon:'bi-folder-plus',label:'Adicionar matéria'},
         {id:'resumos',icon:'bi-clipboard',label:'Resumos'},
         {id:'provas',icon:'bi-file-earmark-text',label:'Provas'},
         {id:'redacao',icon:'bi-pencil-square',label:'Redação'}
@@ -1111,8 +1149,7 @@
         <div class="gdi-central-head-title">
           <span class="gdi-central-icon">📚</span>
           <b>Central de Estudos</b>
-        
-    </div>
+        </div>
         <div class="gdi-central-stats">
           <span class="gdi-central-stat" title="Sequência de dias estudando">
             <i class="bi bi-fire gdi-stat-fire"></i>
@@ -1160,7 +1197,6 @@
       tab=b.dataset.t;FC.active=false;renderPanel();
     });
     const body=panel.querySelector('#gdi-central-body');
-    if(tab==='addmateria'){showAddCourseModal(body);return;}
     if(tab==='home')renderHome(body);
     else if(tab==='cursos')renderCursos(body);
     else if(tab==='questoes')renderQuestoes(body);
@@ -1998,14 +2034,15 @@
         // 1ª tentativa: gdiListAllFiles do host
         if(window.gdiListAllFiles){
           try{
-            
+            console.log('[AddCourse] navegando para:',currentPath);
             const result=await window.gdiListAllFiles(currentPath, pw);
             if(Array.isArray(result))allFiles=result;
           }catch(e){console.warn('[AddCourse] gdiListAllFiles falhou:',e.message);}
         }
         // 2ª tentativa: fetch direto (mesmo formato do host)
         if(!allFiles.length && currentPath!=='/'){
-                    try{
+          console.log('[AddCourse] gdiListAllFiles vazio — tentando fetch direto');
+          try{
             const ctrl=new AbortController();
             const to=setTimeout(()=>ctrl.abort(),15000);
             const r=await fetch(currentPath,{
@@ -2018,7 +2055,8 @@
             if(r.ok){
               const d=await r.json();
               if(d&&d.data&&Array.isArray(d.data.files))allFiles=d.data.files;
-                          }else{
+              console.log('[AddCourse] fetch direto OK — '+allFiles.length+' arquivos');
+            }else{
               console.warn('[AddCourse] fetch direto HTTP',r.status);
             }
           }catch(e){console.warn('[AddCourse] fetch direto falhou:',e.message);}
@@ -2046,7 +2084,8 @@
         }
         loadingEl.style.display='none';
         // ★ Debug log visível no console
-                if(!folders.length && !pdfs.length && !videos.length){
+        console.log('[AddCourse] '+allFiles.length+' arquivos | '+folders.length+' pastas | '+pdfs.length+' PDFs | '+videos.length+' vídeos');
+        if(!folders.length && !pdfs.length && !videos.length){
           foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhum arquivo encontrado aqui.<br><span style="font-size:11px;color:var(--ferreto-text-faint,#6b7488);">Verifique se o caminho existe ou se você está logado.</span></div>';
         }else if(!folders.length){
           // pasta folha — só arquivos
@@ -2135,13 +2174,14 @@
 
     // ── Adiciona curso a partir de pasta selecionada no Drive ──
     async function doAddCourseFromDrive(coursePath, courseName, pdfCount){
-      
+      console.log('[AddCourse] doAddCourseFromDrive iniciado:',coursePath,'|',courseName);
       try{
         const LS_MANUAL='gdi-manual-courses-v1';
         const manual=lsGet(LS_MANUAL,[]);
         // evita duplicar
         if(manual.some(c=>c.path===coursePath)){
-                    showToast('Curso "'+courseName+'" já está adicionado');
+          console.log('[AddCourse] curso já existe — abortando');
+          showToast('Curso "'+courseName+'" já está adicionado');
           return;
         }
         const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
@@ -2151,23 +2191,7 @@
           manual:true,path:coursePath,courseKey:coursePath
         });
         lsSet(LS_MANUAL,manual);
-        
-        // ★ FIX: salva também no Drive via /api/courses/add (para persistir entre sessões/logouts)
-        try{
-          const r=await fetch('/api/courses/add',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({coursePath,courseName,pdfCount:pdfCount||0,addedAt:Date.now()})
-          });
-          if(r.ok){
-            const d=await r.json().catch(()=>({}));
-            
-          }else{
-            console.warn('[AddCourse] /api/courses/add HTTP',r.status,'— continuando mesmo assim');
-          }
-        }catch(e){
-          console.warn('[AddCourse] falha ao salvar no Drive (continuando):',e.message);
-        }
+        console.log('[AddCourse] ★ curso SALVO no localStorage. Próximo: toast + re-render + fechar modal');
 
         // ★ TEORIA #4: feedback visual (toast) ANTES de fechar modal
         if(window.showToast)showToast('Curso "'+courseName+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
@@ -2175,25 +2199,29 @@
         // ★ TEORIA #3: chama renderCursos ANTES de remover overlay (lista atualizada quando modal fecha)
         try{
           renderCursos(box);
-                  }catch(e){
+          console.log('[AddCourse] ★ renderCursos() concluído');
+        }catch(e){
           console.warn('[AddCourse] erro ao re-renderizar:',e.message);
         }
 
         // ★ TEORIA #2: só fecha modal DEPOIS de salvar + re-renderizar (evita "fecha sem nada acontecer")
         if(overlay&&overlay.parentNode){
           overlay.remove();
-                  }
+          console.log('[AddCourse] ★ modal fechado');
+        }
 
         // ★ BATALHÃO: dispara processamento em background (depois que modal já fechou)
         // Não precisa extrair PDFs no front — o batalhão no worker escaneia tudo via gdiListAllFiles
-                try{
+        console.log('[AddCourse] disparando batalhão em background...');
+        try{
           // apenas dispara o batalhão — não espera ( é async em background)
           if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
             // payload mínimo: o worker vai escanear o coursePath e descobrir PDFs sozinho
             window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
               console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
             });
-                      }else{
+            console.log('[AddCourse] ★ batalhão disparado em background');
+          }else{
             console.warn('[AddCourse] gdiIsaPdf.startBattalion não disponível — batalhão não disparado');
           }
         }catch(e){console.warn('[Batalhão] falha:',e.message);}
@@ -2240,7 +2268,7 @@
       const p=btn.dataset.path||'';
       const n=btn.dataset.name||'Pasta';
       const pdfs=parseInt(btn.dataset.pdfs||'0',10);
-      
+      console.log('[AddCourse] ✓ Selecionar clicado (inline global) | path:',p,'| name:',n,'| pdfs:',pdfs);
       // ★ 1) feedback visual imediato: spinner no botão + disable
       const originalText=btn.textContent;
       btn.disabled=true;
@@ -2275,7 +2303,7 @@
     // ── Save handler (decide modo) ──
     saveBtn.onclick=async (e)=>{
       if(e){e.preventDefault();e.stopPropagation();}
-      
+      console.log('[AddCourse] Save button clicado | modo:',currentMode,'| selectedPath:',selectedPath);
       try{
         if(currentMode==='drive'){
           if(!selectedPath||!selectedName){
@@ -2283,7 +2311,8 @@
             showToast('Navegue até uma pasta e clique em "Selecionar esta pasta"');
             return;
           }
-                    await doAddCourseFromDrive(selectedPath, selectedName, 0);
+          console.log('[AddCourse] chamando doAddCourseFromDrive via save button');
+          await doAddCourseFromDrive(selectedPath, selectedName, 0);
         }else{
           // modo manual
           const name=overlay.querySelector('#gdi-amc-name').value.trim();
@@ -2786,9 +2815,9 @@
   if(!document.getElementById('gdi-central-style')){
     const s=document.createElement('style');s.id='gdi-central-style';s.textContent=`
 /* ═══ CENTRAL DE ESTUDOS v3 — design moderno (sidebar + dashboard) ═══ */
-#gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);color:var(--ferreto-text,#f3f5fa);font-family:var(--ferreto-font-body,'Rubik',sans-serif);display:none;overflow-y:auto;}
+#gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);display:none;align-items:stretch;justify-content:stretch;padding:0;animation:gdi-central-in .25s ease;}
 @keyframes gdi-central-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
-.gdi-central-box{width:100%;height:100%;min-height:100vh;margin:0;padding:0;background:var(--ferreto-bg,#070910);border:0;border-radius:0;}
+.gdi-central-box{background:var(--ferreto-bg,#0f1218);border:0;border-radius:0;width:100%;max-width:none;max-height:100dvh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
 /* Header — minimalista, com stats rápidas */
 .gdi-central-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.05));flex-shrink:0;flex-wrap:nowrap;}
 .gdi-central-head-title{display:flex;align-items:center;gap:10px;flex-shrink:0;}
@@ -2804,7 +2833,7 @@
 #gdi-central-x{margin-left:auto;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text-muted,#8b949e);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
 #gdi-central-x:hover{background:rgba(255,107,107,.15);color:#ff8b8b;border-color:rgba(255,107,107,.3);}
 /* Layout principal: sidebar + body */
-.gdi-central-main{display:flex;flex:1;min-height:0;width:100%;}
+.gdi-central-main{flex:1;display:flex;overflow:hidden;}
 /* Sidebar */
 .gdi-central-sidebar{width:220px;flex-shrink:0;background:var(--ferreto-bg-2,#0d1119);border-right:1px solid var(--ferreto-border,#21262d);overflow-y:auto;padding:14px 10px;display:flex;flex-direction:column;gap:2px;}
 .gdi-central-sidebar::-webkit-scrollbar{width:6px;}
@@ -2887,8 +2916,6 @@
 /* Z-index unificado para todos os modais */
 .gdi-modal-overlay{z-index:100000!important;}
 .gdi-fc{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:14px;padding:26px 20px;min-height:170px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;max-width:560px;margin:0 auto;}
-
-
 /* Responsive */
 @media(max-width:768px){
   .gdi-central-sidebar{width:60px;padding:10px 6px;}
@@ -2959,12 +2986,158 @@
     if(e.code==='Space'){e.preventDefault();FC.flip&&FC.flip();}
     else if(e.key==='1'||e.key==='2'||e.key==='3'){FC.grade&&FC.grade(+e.key);}
   });
-
-
   log('central de estudos ativa (v2.6 — aba na navbar, sem observer loop)');
 
   // PLANO A v2: Bootstrap robusto — Após login, redireciona para ?central=1
-// (bootstrap removido — Central abre via botão da navbar como antes)
+  console.log('[GDI M22] ★ bootstrap Plano A v2 carregado');
+  window.gdiBootstrapCentral=()=>{console.log('[GDI M22] bootstrap manual');bootstrapCentralOnLogin();};
+
+  function bootstrapCentralOnLogin(){
+    console.log('[GDI M22] bootstrapCentralOnLogin rodando | URL:',window.location.search);
+    const params=new URLSearchParams(window.location.search);
+    const shouldOpenCentral=params.get('central')==='1';
+    if(!shouldOpenCentral){
+      try{
+        const manual=lsGet('gdi-manual-courses-v1',[]);
+        const watched=Object.keys((window.GDIUser&&window.GDIUser.dump&&window.GDIUser.dump().watched)||{});
+        if(window.GDIUser && window.GDIUser.loaded && window.GDIUser.loaded()
+           && manual.length===0 && watched.length===0){
+          console.log('[GDI M22] usuário logado sem cursos — abrindo Central');
+          setTimeout(()=>tryOpenCentralAndPrompt(),1500);
+        }
+      }catch(_){}
+      return;
+    }
+    console.log('[GDI M22] ★ ?central=1 detectado — abrindo Central');
+    // NÃO limpa URL ainda — só depois que Central abrir de fato
+    tryOpenCentralAndPrompt();
+    [1000,2000,3000,5000,8000].forEach(delay=>{
+      setTimeout(()=>{
+        const visible=panel&&panel.style.display==='flex'&&panel.parentNode;
+        if(!visible){
+          console.log('[GDI M22] retry após',delay,'ms — tentando abrir');
+          tryOpenCentralAndPrompt();
+        }else{
+          try{
+            if(window.location.search.includes('central=1')){
+              const newUrl=window.location.pathname+window.location.hash;
+              window.history.replaceState({},document.title,newUrl);
+              console.log('[GDI M22] URL limpa');
+            }
+          }catch(_){}
+        }
+      },delay);
+    });
+  }
+
+  function tryOpenCentralAndPrompt(retries){
+    retries=retries||0;
+    if(retries>30){console.warn('[GDI M22] desistindo após 30 tentativas');return;}
+    console.log('[GDI M22] tryOpenCentralAndPrompt tentativa',retries+1);
+    // Método 1: openPanel() (função local)
+    try{
+      openPanel('cursos');
+      console.log('[GDI M22] ★ openPanel() chamado | panel:',panel?'OK':'null','| display:',panel?panel.style.display:'N/A');
+    }catch(e){
+      console.warn('[GDI M22] erro em openPanel:',e.message,'— retry em 500ms');
+      setTimeout(()=>tryOpenCentralAndPrompt(retries+1),500);
+      return;
+    }
+    // Verifica visibilidade após 200ms
+    setTimeout(()=>{
+      const isVisible=panel&&panel.style.display==='flex'&&panel.parentNode&&panel.offsetHeight>0;
+      console.log('[GDI M22] panel visível?',isVisible,'| offsetHeight:',panel?panel.offsetHeight:0);
+      if(!isVisible){
+        console.warn('[GDI M22] panel não visível — tentando via navbar button');
+        const navBtn=document.querySelector('.gdi-central-nav-btn,#gdi-central-nav-btn,[data-central-btn],a[href*="central"],button[onclick*="openPanel"]');
+        if(navBtn){
+          console.log('[GDI M22] clicando navbar btn:',navBtn.tagName,navBtn.className||navBtn.id);
+          navBtn.click();
+        }else{
+          console.log('[GDI M22] navbar btn não encontrado — retry em 500ms');
+          setTimeout(()=>tryOpenCentralAndPrompt(retries+1),500);
+        }
+      }
+    },200);
+    // depois que a Central abriu, verifica cursos
+    setTimeout(()=>{
+      try{
+        const manual=lsGet('gdi-manual-courses-v1',[]);
+        const allCourses=collectCourses();
+        if(manual.length===0 && allCourses.length===0){
+          console.log('[GDI M22] primeiro login — auto-abrindo Add Course modal');
+          if(window.showToast)showToast('🐩 Bem-vindo! Adicione seus cursos para começar.');
+          setTimeout(()=>{
+            const body=panel&&panel.querySelector('#gdi-central-body');
+            if(body){showAddCourseModal(body);}
+          },800);
+        }else{
+          if(window.showToast)showToast('🐩 Bem-vindo de volta! Retomando...');
+          tryResumeBattalion();
+        }
+      }catch(e){console.warn('[GDI M22] erro:',e.message);}
+    },1000);
+  }
+
+  async function tryResumeBattalion(){
+    try{
+      const r=await fetch('/api/courses/list',{cache:'no-store'});
+      if(!r.ok){console.warn('[GDI M22] /api/courses/list HTTP',r.status);return;}
+      const d=await r.json();
+      if(!d||!d.ok||!Array.isArray(d.courses))return;
+      const pending=d.courses.filter(c=>c.materialsReady===false||!c.materialsReady);
+      if(pending.length===0){console.log('[GDI M22] todos cursos prontos');return;}
+      console.log('[GDI M22] retomando',pending.length,'curso(s)');
+      for(const c of pending){
+        try{
+          if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
+            window.gdiIsaPdf.startBattalion(c.coursePath, c.coursePath, c.courseName||'curso', [])
+              .catch(e=>console.warn('[Battalion resume] falha:',e.message));
+          }
+        }catch(e){console.warn('[Battalion resume] erro:',e.message);}
+      }
+      if(window.showToast)showToast('⚡ Batalhão retomado para '+pending.length+' curso(s)');
+    }catch(e){console.warn('[GDI M22] erro:',e.message);}
+  }
+
+  // MÚLTIPLOS GATILHOS (defensivo)
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',()=>setTimeout(bootstrapCentralOnLogin,800));
+  }else{
+    setTimeout(bootstrapCentralOnLogin,800);
+  }
+  if(window.GDIUser && typeof window.GDIUser.ready==='function'){
+    window.GDIUser.ready().then(bootstrapCentralOnLogin).catch(()=>setTimeout(bootstrapCentralOnLogin,1500));
+  }else{
+    setTimeout(bootstrapCentralOnLogin,1500);
+  }
+  if(window.Bus && window.Bus.onGlobal){
+    window.Bus.onGlobal('user:ready',()=>setTimeout(bootstrapCentralOnLogin,300));
+    window.Bus.onGlobal('page:change',()=>{
+      if(window.location.search.includes('central=1')){
+        console.log('[GDI M22] page:change + ?central=1 → re-tentando');
+        setTimeout(bootstrapCentralOnLogin,500);
+      }
+    });
+  }
+  const setupBootstrapObserver=()=>{
+    const navEl=document.querySelector('.gdi-nav')||document.getElementById('nav');
+    if(!navEl){setTimeout(setupBootstrapObserver,500);return;}
+    new MutationObserver(()=>{
+      if(window.location.search.includes('central=1')){
+        const visible=panel&&panel.style.display==='flex';
+        if(!visible){
+          console.log('[GDI M22] navbar mudou + ?central=1 → re-tentando');
+          bootstrapCentralOnLogin();
+        }
+      }
+    }).observe(navEl,{childList:true,subtree:true});
+  };
+  setupBootstrapObserver();
+
+  try{localStorage.setItem('gdi-session-active','1');}catch(_){}
+  window.addEventListener('beforeunload',()=>{try{localStorage.setItem('gdi-session-active','0');}catch(_){}});
+
 })();
 
 // ═══════════════════════════════════════════════════════════════
@@ -3316,7 +3489,7 @@
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${v.correct} acertos · ${v.wrong} erros · ${v.total} total</span>
-          ${linkedKey?'<span style="color:var(--ferreto-primary,#ff8b9f);font-size:10px;"><i class="bi bi-link-45deg"></i> Meus Cursos</span>':''}
+          ${linked?'<span style="color:var(--ferreto-primary,#ff8b9f);font-size:10px;"><i class=\"bi bi-link-45deg\"></i> Meus Cursos</span>':''}
         </div>
         <div style="height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;">
           <div style="height:100%;width:${pct}%;background:${c};border-radius:3px;transition:width .3s;"></div>

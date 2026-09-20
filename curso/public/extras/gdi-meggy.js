@@ -419,7 +419,8 @@
     // as primeiras 15 páginas já dão contexto suficiente para a Meggy gerar
     // resumo + questões + pílulas úteis.
     if(!txt.trim()||txt.trim().length<50){
-            const ocrMaxPages=Math.min(doc.numPages,15);
+      console.log('[Meggy] PDF sem texto selecionável — ativando OCR (Tesseract.js)');
+      const ocrMaxPages=Math.min(doc.numPages,15);
       if(progressCb)progressCb({phase:'ocr-init',page:0,total:ocrMaxPages});
       try{
         let ocrTxt='';
@@ -465,16 +466,9 @@
   }
 
   // ── Render Markdown (uses marked if available, fallback to <br>) ──
-  // ★ XSS-safe: NUNCA retorna HTML não sanitizado — fallback sempre escapa
+  // ★ XSS-safe: sempre passa por gdiSanitize (DOMPurify)
   function renderMd(txt){
-    if(window.marked){
-      try{
-        const html=marked.parse(txt);
-        // ★ FIX: se gdiSanitize não carregou (CDL caiu, etc.), NÃO retorna HTML cru
-        if(window.gdiSanitize){try{return window.gdiSanitize(html);}catch(_){}}
-        return esc(txt).replace(/\n/g,'<br>');
-      }catch(_){}
-    }
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return esc(txt).replace(/\n/g,'<br>');
   }
 
@@ -534,31 +528,9 @@
   }
 
   // ── Summaries storage ──
-  // ★ FIX: agora salva também o path do curso e a matéria — para renderResumos agrupar corretamente
-  function saveIsaSummary(lesson, summary, coursePath, subject){
+  function saveIsaSummary(lesson,summary){
     const arr=lsGet(LS_SUM,[]);
-    // extrai course e subject do path se não vierem explícitos
-    // path típico: /7:/Sou + Carreiras Policiais 5.0/Bloco I - Direito Constitucional/01 - Aula.mp4
-    let derivedCourse=coursePath||'';
-    let derivedSubject=subject||'';
-    if(!derivedCourse){
-      // tenta derivar do lessonKey atual (URL do navegador)
-      const p=window.location.pathname||'';
-      const seg=p.split('/').filter(Boolean);
-      if(seg.length>=2){
-        // /7:/Curso/Materia/Aula → curso = seg[1], materia = seg[2] (se houver)
-        derivedCourse='/'+seg.slice(0,2).join('/')+'/';
-        if(seg.length>=3)derivedSubject=decodeURIComponent(seg[2]);
-      }
-    }
-    arr.unshift({
-      id:uid(),
-      lesson:String(lesson||'Aula').slice(0,200),
-      summary:String(summary||''),
-      path:derivedCourse,
-      subject:derivedSubject||'Geral',
-      date:Date.now()
-    });
+    arr.unshift({id:uid(),lesson:String(lesson||'Aula').slice(0,120),summary:String(summary||''),date:Date.now()});
     lsSet(LS_SUM,arr.slice(0,200));
   }
   function listIsaSummaries(){return lsGet(LS_SUM,[]);}
@@ -878,7 +850,8 @@
       // flashcards do cache
       if(cached.questions.length)autoCreateFlashcards(cached.questions,lesson,lessonKey());
       saveIsaSummary(lesson,_chainCache[key].summary);
-            return _chainCache[key];
+      console.log('[Meggy] cache completo do Drive — sem retrabalho');
+      return _chainCache[key];
     }
 
     // só extrai PDF se precisa gerar algo
@@ -936,14 +909,14 @@
 
     // ★ PARALELISMO TOTAL: resumo + pílulas + questões de cada PDF — TODOS ao mesmo tempo
     // Cada tarefa recebe um keyHint diferente para distribuir entre as APIs NVIDIA
-    
+    let keyHintCounter=0;
     const allTasks=[];
 
     // tarefa 1: resumo
     if(!_chainCache[key].summary){
       allTasks.push({
-        
-        fn:()=>callIsaKeyed('Leia este material de aula e faça um resumo COMPLETO e estruturado em Markdown. Cubra TODOS os tópicos. Organize em seções com ## títulos, use **negrito** para destaques e listas. Não omita nenhum tema:\n\n'+allText.slice(0,20000),0)
+        hint:keyHintCounter++,
+        fn:()=>callIsaKeyed('Leia este material de aula e faça um resumo COMPLETO e estruturado em Markdown. Cubra TODOS os tópicos. Organize em seções com ## títulos, use **negrito** para destaques e listas. Não omita nenhum tema:\n\n'+allText.slice(0,20000),keyHintCounter-1)
           .then(r=>{if(r&&r.trim()){_chainCache[key].summary=r;saveIsaSummary(lesson,r);}})
           .catch(e=>console.warn('[Meggy] resumo falhou',e.message))
       });
@@ -952,8 +925,8 @@
     // tarefa 2: pílulas
     if(!_chainCache[key].mindmap){
       allTasks.push({
-        
-        fn:()=>callIsaKeyed('Crie "Pílulas" deste material — um resumo ultra-conciso em bullets. Apenas pontos-chave para revisão rápida. Máximo 15 bullets. Formato:\n# Pílulas\n- Ponto-chave 1\n- Ponto-chave 2\n...\n\nConteúdo:\n'+allText.slice(0,20000),0)
+        hint:keyHintCounter++,
+        fn:()=>callIsaKeyed('Crie "Pílulas" deste material — um resumo ultra-conciso em bullets. Apenas pontos-chave para revisão rápida. Máximo 15 bullets. Formato:\n# Pílulas\n- Ponto-chave 1\n- Ponto-chave 2\n...\n\nConteúdo:\n'+allText.slice(0,20000),keyHintCounter-1)
           .then(r=>{if(r&&r.trim())_chainCache[key].mindmap=r;})
           .catch(e=>console.warn('[Meggy] pílulas falhou',e.message))
       });
@@ -976,8 +949,8 @@
       // uma tarefa por PDF
       pdfTexts.forEach((pdf)=>{
         allTasks.push({
-          
-          fn:()=>callIsaKeyed('Você é um examinador de concurso público brasileiro experiente. Baseado neste material, gere 10 questões de concurso em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"legalText":"...","explanation":"...","fundamentacao":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"legalText":"...","explanation":"...","fundamentacao":"..."}\n\nCAMPOS:\n- statement: enunciado claro, contexto completo\n- legalText: o dispositivo legal/dispositivo normativo aplicável (ex: "art. 5º, CF"; "Súmula Vinculante 14"; "Lei 8.906/94, art. 7º")\n- explanation: explicação técnica do acerto/erro (regra violada ou aplicada)\n- fundamentacao: fundamentação didática completa, explicando por que a alternativa correta está correta E por que as outras estão erradas\n\nSem comentários, só JSON.\n\n'+pdf.text.slice(0,15000),0)
+          hint:keyHintCounter++,
+          fn:()=>callIsaKeyed('Baseado neste material, gere 10 questões de concurso público em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"explanation":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"explanation":"..."}\nSem comentários, só JSON:\n\n'+pdf.text.slice(0,15000),keyHintCounter-1)
             .then(resp=>{
               if(!resp)return;
               try{
@@ -986,9 +959,9 @@
                   if(!q||!q.statement)return;
                   let cleanQ;
                   if(q.type==='tf'||(!q.options&&q.correct!==undefined)){
-                    cleanQ={type:'tf',statement:String(q.statement),options:['Certo','Errado'],correct:Math.max(0,Math.min(1,Number(q.correct)||0)),explanation:String(q.explanation||''),legalText:String(q.legalText||q.fundamentacao||''),fundamentacao:String(q.fundamentacao||'')};
+                    cleanQ={type:'tf',statement:String(q.statement),options:['Certo','Errado'],correct:Math.max(0,Math.min(1,Number(q.correct)||0)),explanation:String(q.explanation||'')};
                   }else if(Array.isArray(q.options)){
-                    cleanQ={type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||''),legalText:String(q.legalText||q.fundamentacao||''),fundamentacao:String(q.fundamentacao||'')};
+                    cleanQ={type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||'')};
                   }
                   if(cleanQ){
                     const all=lsGet(LQ,[]);
@@ -1005,10 +978,7 @@
       });
     }
 
-    // ★ EXECUTA TODAS AS TAREFAS AO MESMO TEMPO (paralelismo)
-    // Se OpenRouter estiver configurado no worker, cada callIsa automaticamente
-    // dispara 3 modelos free em paralelo (race) — primeiro a responder vence.
-    // Isso significa que resumo+pílulas+questões(N PDFs) = 2+N tarefas × 3 modelos = race máximo.
+    // ★ EXECUTA TODAS AS TAREFAS AO MESMO TEMPO
     if(allTasks.length>0){
       await Promise.allSettled(allTasks.map(t=>t.fn()));
     }
@@ -1851,70 +1821,8 @@
     await summary(items,bodyEl,lessonName);
   }
 
-  // ── Buscar questões compartilhadas por outros alunos da mesma matéria ──
-  // ★ usado pelo Simulado (gdi-study.js) para enriquecer o banco
-  async function fetchSharedQuestions(subjectFilter){
-    try{
-      const url='/api/ai/shared-flashcards'+(subjectFilter?'?subject='+encodeURIComponent(subjectFilter):'')+'&kind=question';
-      const r=await fetch(url,{cache:'no-store'});
-      const d=await r.json();
-      if(d&&d.ok&&Array.isArray(d.items)){
-        // converte cards compartilhados em questões
-        return d.items.filter(it=>it.statement).map(it=>({
-          id:it.id||('shared-'+Math.random().toString(36).slice(2,7)),
-          subject:subjectFilter||it.subject||'Compartilhada',
-          type:it.type||'mc',
-          statement:it.statement,
-          options:it.options||['a','b','c','d'],
-          correct:it.correct||0,
-          explanation:it.explanation||'',
-          legalText:it.legalText||'',
-          fundamentacao:it.fundamentacao||'',
-          source:'shared'
-        }));
-      }
-      return [];
-    }catch(_){return [];}
-  }
-
-  // ── Salvar MD da redação corrigida no Drive do aluno ──
-  // ★ chamado pela aba Redação (gdi-study.js) após correção
-  async function saveEssayMD(markdown,banca,tipo,score){
-    try{
-      const r=await fetch('/api/ai/essay/save',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          markdown:String(markdown||''),
-          banca:banca||'',
-          tipo:tipo||'',
-          score:String(score||''),
-          date:new Date().toISOString()
-        })});
-      const d=await r.json();
-      return !!(d&&d.ok);
-    }catch(_){return false;}
-  }
-
-  // ── Batalhão: dispara processamento em background via worker ──
-  // ★ chamado quando aluno adiciona um curso na Central de Estudos
-  async function startBattalion(courseKey, coursePath, lessonName, pdfList){
-    try{
-      const body={courseKey, coursePath, lessonName, pdfs:pdfList.map(p=>({name:p.name||'',url:p.url||'',text:p.text||''}))};
-      const r=await fetch('/api/ai/battalion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const d=await r.json();
-      return !!(d&&d.ok);
-    }catch(_){return false;}
-  }
-  // ── Verifica se o batalhão já processou um curso ──
-  async function getBattalionStatus(courseKey){
-    try{
-      const r=await fetch('/api/ai/battalion/status?courseKey='+encodeURIComponent(courseKey),{cache:'no-store'});
-      const d=await r.json();
-      return d;
-    }catch(_){return {ok:false,processed:false};}
-  }
-
   // ── Public API ──
-  window.gdiIsaPdf={summary,questions,mindmap,flashcards,regenerate,extractPdfText,saveIsaSummary,listIsaSummaries,delIsaSummary,fetchSharedQuestions,fetchSharedSummaries,saveSharedSummary,saveEssayMD,startBattalion,getBattalionStatus};
+  window.gdiIsaPdf={summary,questions,mindmap,flashcards,regenerate,extractPdfText,saveIsaSummary,listIsaSummaries,delIsaSummary};
 
   // ── Render: Resumos (M22 new tab) ──
   // ── Salvar resumo no pool compartilhado (todos os usuários) ──
@@ -1936,142 +1844,61 @@
 
   window.renderResumos=function(box){
     const all=listIsaSummaries();
-    // ★ MIGRAÇÃO: para resumos antigos sem .path, tenta derivar do .lesson
-    // Ex: lesson "Sou + Carreiras Policiais 5.0 - 01 - Aula" → path default '/0:/Sou + Carreiras Policiais 5.0/'
-    for(const r of all){
-      if(!r.path){
-        // tenta extrair curso do lesson (antes do ' - ')
-        const lessonStr=r.lesson||'';
-        const dashIdx=lessonStr.indexOf(' - ');
-        if(dashIdx>0){
-          const courseName=lessonStr.slice(0, dashIdx).trim();
-          r.path='/0:/'+courseName+'/';
-          r.subject=r.subject||'Geral';
-        }
-      }
-      // se ainda não tem path, marca como órfão
-      if(!r.path)r.path='__sem_curso__';
-      if(!r.subject)r.subject='Geral';
-    }
-    // ★ agrupar por curso (path do aluno), trilha e matéria
-    const trails=(window.gdiTrails&&window.gdiTrails.get())||[];
-    const subjects=(window.gdiSubjects&&window.gdiSubjects.get())||[];
-    // tenta derivar curso do resumo (lesson = nome da aula → pega 1º segmento do path)
-    function courseOf(r){
-      const p=r.path||r.lessonKey||'';
-      if(p&&p!=='__sem_curso__'){
-        const seg=p.split('/').filter(Boolean);
-        if(seg.length>=2){
-          // /7:/Curso/Materia → retorna "/7:/Curso" (sem trailing slash)
-          return '/'+seg.slice(0,2).join('/');
-        }
-        if(seg.length===1)return seg[0];
-      }
-      // fallback: tenta extrair do lesson
-      const lessonStr=r.lesson||'';
-      const dashIdx=lessonStr.indexOf(' - ');
-      if(dashIdx>0)return lessonStr.slice(0, dashIdx).trim();
-      return 'Sem curso';
-    }
-    function subjectOf(r){
-      if(r.subject&&r.subject!=='Geral')return r.subject;
-      // tenta extrair do lesson
-      const lessonStr=r.lesson||'';
-      const dashIdx=lessonStr.indexOf(' - ');
-      if(dashIdx>0){
-        const after=lessonStr.slice(dashIdx+3);
-        // se após o ' - ' houver outro ' - ', pega o primeiro segmento
-        const dash2=after.indexOf(' - ');
-        if(dash2>0)return after.slice(0,dash2).trim();
-        return after.trim();
-      }
-      return 'Geral';
-    }
-    const byCourse={};
-    all.forEach(r=>{
-      const c=courseOf(r);
-      if(!byCourse[c])byCourse[c]={items:[],subject:{} };
-      byCourse[c].items.push(r);
-      const s=subjectOf(r);
-      if(!byCourse[c].subject[s])byCourse[c].subject[s]=[];
-      byCourse[c].subject[s].push(r);
-    });
-    // ★ Tiles por curso (igual ao Meus Cursos), retangulares
-    const tilesHtml=Object.entries(byCourse).map(([course,info])=>{
-      const subs=Object.keys(info.subject).length;
-      const totalChars=info.items.reduce((s,r)=>s+(r.summary||'').length,0);
-      return `<div class="gdi-course" data-course="${esc(course)}" style="cursor:pointer;display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-left:4px solid var(--ferreto-primary,#ff8b9f);">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(course)}</b>
-          <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));padding:2px 8px;border-radius:8px;">${info.items.length}</span>
-        </div>
-        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${subs} matéria(s) · ${Math.round(totalChars/1000)}k chars</div>
-      </div>`;
-    }).join('');
     box.innerHTML=`
-      <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;">
-        <div style="font-size:32px;flex:none;">📚</div>
-        <div style="flex:1;min-width:240px;">
-          <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:18px;">Resumos da Meggy</h3>
-          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0;line-height:1.5;">${all.length} resumo${all.length===1?'':'s'} gerado${all.length===1?'':'s'} pela Meggy 🐩, organizados por curso, trilha e matéria. Clique para expandir.</p>
-        </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
+        <b style="color:var(--ferreto-text,#f0f6fc);">${all.length} resumo${all.length===1?'':'s'}</b>
+        <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">gerados pela Meggy 🐩 a partir dos PDFs das aulas</span>
       </div>
-      ${!all.length?'<div class="gdi-notes-empty" style="padding:40px 20px;text-align:center;"><i class="bi bi-file-earmark-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhum resumo ainda.<br><span style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Abra uma aula com PDF e clique em "Resumo Meggy" na barra de materiais.</span></div>':`<h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Meus resumos (${all.length})</h4>`}
-      <div class="gdi-courses" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:24px;">${tilesHtml}</div>
-      <div id="gdi-rs-list" style="display:none;flex-direction:column;gap:8px;"></div>
+      <div id="gdi-rs-list" style="display:flex;flex-direction:column;gap:8px;max-width:760px;"></div>
       <div id="gdi-rs-shared-section" style="margin-top:24px;">
-        <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;"><i class="bi bi-people"></i> Resumos compartilhados por outros alunos (mesma matéria)</h4>
-        <div id="gdi-rs-shared" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
-          <div class="gdi-notes-empty" style="color:var(--ferreto-text-faint,#6b7488);grid-column:1/-1;">Carregando…</div>
+        <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;">📚 Resumos compartilhados por outros alunos</h4>
+        <div id="gdi-rs-shared" style="display:flex;flex-direction:column;gap:8px;max-width:760px;">
+          <div class="gdi-notes-empty" style="color:var(--ferreto-text-faint,#6b7488);">Carregando resumos compartilhados…</div>
         </div>
       </div>`;
-    // ★ Tiles clicáveis → lista filtrada
     const list=box.querySelector('#gdi-rs-list');
-    box.querySelectorAll('[data-course]').forEach(tile=>{
-      tile.onclick=()=>{
-        const course=tile.dataset.course;
-        const items=byCourse[course]?byCourse[course].items:[];
-        box.querySelectorAll('[data-course]').forEach(t=>t.style.outline='');
-        tile.style.outline='2px solid var(--ferreto-primary,#ff8b9f)';
-        list.style.display='flex';
-        list.innerHTML='';
-        items.forEach(r=>{
-          const row=document.createElement('div');row.className='gdi-note';
-          row.style.flexDirection='column';row.style.alignItems='stretch';
-          const dt=new Date(r.date).toLocaleString('pt-BR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-          row.innerHTML=`<div class="gdi-rs-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%;cursor:pointer;">
-            <span style="flex:1;min-width:0;">
-              <b style="color:var(--ferreto-text,#f0f6fc);"><i class="bi bi-stars" style="color:var(--ferreto-primary,#ff8b9f);"></i> ${esc(r.lesson)}</b>
-              <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-left:6px;">· ${dt} · ${subjectOf(r)}</span>
-            </span>
-            <button class="gdi-note-del" title="Excluir" style="flex:none;"><i class="bi bi-x-lg"></i></button>
-          </div>
-          <div class="gdi-rs-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
-          const body=row.querySelector('.gdi-rs-body');
-          const head=row.querySelector('.gdi-rs-head');
-          head.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
-          row.querySelector('button').onclick=(e)=>{e.stopPropagation();delIsaSummary(r.id);window.renderResumos(box);showToast('Resumo excluído');};
-          list.appendChild(row);
-        });
-        list.scrollIntoView({behavior:'smooth',block:'nearest'});
-      };
-    });
-    // carrega resumos compartilhados (em tiles também)
+    if(!all.length){
+      list.innerHTML='<div class="gdi-notes-empty">Nenhum resumo ainda. Abra uma aula com PDF e clique em "Resumo Meggy" na barra de materiais.</div>';
+    }else{
+      all.forEach(r=>{
+        const row=document.createElement('div');row.className='gdi-note';
+        row.style.flexDirection='column';row.style.alignItems='stretch';
+        const dt=new Date(r.date).toLocaleString('pt-BR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+        row.innerHTML=`<div class="gdi-rs-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%;cursor:pointer;">
+          <span style="flex:1;min-width:0;">
+            <b style="color:var(--ferreto-text,#f0f6fc);"><i class="bi bi-stars" style="color:var(--ferreto-primary,#ff8b9f);"></i> ${esc(r.lesson)}</b>
+            <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-left:6px;">· ${dt}</span>
+          </span>
+          <button class="gdi-note-del" title="Excluir" style="flex:none;"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="gdi-rs-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
+        const body=row.querySelector('.gdi-rs-body');
+        const head=row.querySelector('.gdi-rs-head');
+        head.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
+        row.querySelector('button').onclick=(e)=>{e.stopPropagation();delIsaSummary(r.id);window.renderResumos(box);showToast('Resumo excluído');};
+        list.appendChild(row);
+      });
+    }
+    // carrega resumos compartilhados
     const sharedEl=box.querySelector('#gdi-rs-shared');
     fetchSharedSummaries().then(shared=>{
-      if(!shared.length){sharedEl.innerHTML='<div class="gdi-notes-empty" style="grid-column:1/-1;">Nenhum resumo compartilhado ainda.</div>';return;}
+      if(!shared.length){sharedEl.innerHTML='<div class="gdi-notes-empty">Nenhum resumo compartilhado ainda.</div>';return;}
       sharedEl.innerHTML='';
       shared.slice().reverse().forEach(r=>{
+        const row=document.createElement('div');row.className='gdi-note';
+        row.style.flexDirection='column';row.style.alignItems='stretch';
         const dt=new Date(r.date||0).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'});
-        const tile=document.createElement('div');tile.className='gdi-course';tile.style.cursor='pointer';tile.style.padding='12px 14px';
-        tile.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <b style="color:var(--ferreto-secondary,#5ddeda);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="bi bi-people" style="font-size:11px;"></i> ${esc(r.lessonName||'Aula')}</b>
+        row.innerHTML=`<div class="gdi-rs-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%;cursor:pointer;">
+          <span style="flex:1;min-width:0;">
+            <b style="color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-people" style="font-size:12px;"></i> ${esc(r.lessonName||'Aula')}</b>
+            <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-left:6px;">· por ${esc(r.author||'aluno')} · ${dt}</span>
+          </span>
         </div>
-        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-top:4px;">por ${esc(r.author||'aluno')} · ${dt}</div>
-        <div class="gdi-rs-shared-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
-        const body=tile.querySelector('.gdi-rs-shared-body');
-        tile.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
-        sharedEl.appendChild(tile);
+        <div class="gdi-rs-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
+        const body=row.querySelector('.gdi-rs-body');
+        const head=row.querySelector('.gdi-rs-head');
+        head.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
+        sharedEl.appendChild(row);
       });
     });
   };
@@ -2177,14 +2004,7 @@
   function save(){try{sessionStorage.setItem(STORE,JSON.stringify(messages.slice(-20)));}catch(_){}}
 
   function renderMd(txt){
-    if(window.marked){
-      try{
-        const html=marked.parse(txt);
-        // ★ FIX: nunca retorna HTML não sanitizado — fallback escapa
-        if(window.gdiSanitize){try{return window.gdiSanitize(html);}catch(_){}}
-        return esc(txt).replace(/\n/g,'<br>');
-      }catch(_){}
-    }
+    if(window.marked){try{return window.gdiSanitize?window.gdiSanitize(marked.parse(txt)):marked.parse(txt);}catch(_){}}
     return txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
   }
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -2275,8 +2095,7 @@
   const body=panel.querySelector('#gdi-ai-body');
   const input=panel.querySelector('#gdi-ai-input');
   const sendBtn=panel.querySelector('#gdi-ai-send');
-  // ★ FIX: badge estava buscando dentro do panel, mas o badge está no fab
-  const badge=fab.querySelector('#gdi-ai-fab-badge');
+  const badge=panel.querySelector('#gdi-ai-fab-badge');
 
   function addMsg(role,text){
     const m={role,text};
@@ -2466,10 +2285,10 @@
   }
   function serverLabel(){
     if(_serverProvider==='nvidia-nim')return {name:'NVIDIA NIM',label:'NVIDIA NIM <b>(LLaMA · /api/ai)</b>'};
-    if(_serverProvider==='zhipu-ai')return {name:'Meggy AI (BlackTie)',label:'Meggy AI <b>(BlackTie GLM · /api/ai)</b>'};
+    if(_serverProvider==='zhipu-ai')return {name:'Meggy AI',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
     if(_serverProvider==='cf-workers-ai')return {name:'CF Workers AI',label:'Cloudflare <b>(Workers AI · /api/ai)</b>'};
     if(_serverProvider==='openai')return {name:'OpenAI',label:'OpenAI <b>(/api/ai)</b>'};
-    return {name:'Meggy AI (BlackTie)',label:'Meggy AI <b>(BlackTie GLM · /api/ai)</b>'};
+    return {name:'Meggy AI',label:'智谱AI <b>(Zhipu GLM · /api/ai)</b>'};
   }
 
   // detecta a IA do navegador ao carregar (1×) + status do servidor
@@ -2480,14 +2299,15 @@
     updateStatus();
     const browserReady=(_browserAIState==='ready');
     const serverOk=!!_serverEnabled;
-    
+    console.log('[Meggy] IA do navegador:',_browserAIState,'| servidor habilitado:',serverOk);
     if(browserReady||serverOk){
       showWidget();
     }else{
       // Nenhum backend disponível — esconde o botão mas mantém o código.
       // Ativa automaticamente quando o usuário configurar ZHIPU_API_KEY.
       hideWidget();
-          }
+      console.log('[Meggy] widget oculto — configure ZHIPU_API_KEY no Cloudflare para ativar');
+    }
   });
 
   // badge de novidade após 8s se nunca abriu (só se visível)

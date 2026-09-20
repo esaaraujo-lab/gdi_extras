@@ -1,6 +1,4 @@
 // ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
 // gdi-study.js — Central de Estudos + Estudo Ativo + Visual
 // 
 // Módulos:
@@ -28,8 +26,6 @@
   const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
   const fmtDate=ds=>{try{return new Date(ds+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})}catch(_){return ds}};
   const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-  // ★ Fisher-Yates shuffle (substitui o biased Math.random()-.5 sort)
-  function fisherYates(arr){const a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 
   // ── Banco de questões ──
   const questions=()=>lsGet(LQ,[]);
@@ -102,19 +98,7 @@
     const qs=questions();
     const due=dueQ().length;
     const err=errQ().length;
-    // ★ Hero state convidativo quando vazio / poucas questões
-    const hero=qs.length<3?`<div class="gdi-dashboard-hero" style="background:linear-gradient(135deg,rgba(255,139,159,.10),rgba(93,222,218,.06));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:16px;padding:24px 22px;margin-bottom:18px;">
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-          <div style="font-size:42px;">📝</div>
-          <div style="flex:1;min-width:240px;">
-            <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:18px;">Comece seu banco de questões</h3>
-            <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0;line-height:1.5;">Gere questões a partir das aulas que você assistiu em <b>Meus Cursos</b>, ou adicione manualmente. A Meggy cria questões comentadas com <b>fundamentação legal</b> e <b>explicação do erro/acerto</b>.</p>
-          </div>
-          <button id="hero-gen" class="gdi-btn gdi-btn-primary" style="font-size:13px;"><i class="bi bi-stars"></i> Gerar agora</button>
-        </div>
-      </div>`:'';
     box.innerHTML=`
-      ${hero}
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
         <b style="color:var(--ferreto-text,#f0f6fc);">${qs.length} questões</b>
         ${due?`<span style="color:var(--ferreto-primary,#ff8b9f);font-size:12px;">${due} p/ revisar hoje</span>`:''}
@@ -177,9 +161,6 @@
     drawSubjects();
     drawList();
 
-    // ★ hero CTA
-    const heroBtn=box.querySelector('#hero-gen');
-    if(heroBtn)heroBtn.onclick=()=>openGen(box,drawList);
     box.querySelector('#gdi-q-resolve-due').onclick=()=>startSession(box,dueQ(),'Revisões de hoje');
     box.querySelector('#gdi-q-resolve-err').onclick=()=>startSession(box,errQ(),'Caderno de erros');
     box.querySelector('#gdi-q-gen').onclick=()=>openGen(box,drawList);
@@ -392,18 +373,10 @@
   window.renderSimulado=function(box){
     const qs=questions();
     const sims=simus().slice().reverse();
-    // lista cursos do aluno para filtrar questões por curso
-    const courses=collectCourses();
-    const courseNames=courses.map(c=>{const seg=c.key.split('/');return seg.length>1?seg.slice(1).join('/'):c.key;});
     box.innerHTML=`
       <div style="margin-bottom:18px;">
         <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Montar simulado</h4>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Curso:</label>
-          <select id="sim-course" style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#e6edf3);padding:5px 8px;font-size:12px;max-width:260px;">
-            <option value="">Todos os cursos</option>
-            ${courseNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}
-          </select>
           <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Questões:</label>
           <input id="sim-n" type="number" min="5" max="50" value="10" style="width:64px;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#e6edf3);padding:5px;text-align:center;font-size:12px;">
           <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Tempo (min):</label>
@@ -411,7 +384,6 @@
           <button id="sim-go" class="gdi-btn gdi-btn-primary" style="font-size:12px;" ${qs.length>=5?'':'disabled'}><i class="bi bi-play-fill"></i> Iniciar simulado</button>
         </div>
         ${qs.length<5?'<p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:8px;">Adicione ao menos 5 questões (gerar com a Meggy ou importar).</p>':''}
-        <p style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:8px;">O simulado usa questões dos cursos matriculados (Meus Cursos) + questões de outros alunos da mesma matéria, quando disponíveis.</p>
       </div>
       <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:18px 0 8px;">Histórico</h4>
       <div id="sim-hist" style="display:flex;flex-direction:column;gap:6px;max-width:760px;"></div>
@@ -420,30 +392,9 @@
       box.querySelector('#sim-go').onclick=()=>{
         const n=Math.min(parseInt(box.querySelector('#sim-n').value,10)||10,qs.length);
         const mins=parseInt(box.querySelector('#sim-time').value,10)||30;
-        const courseFilter=box.querySelector('#sim-course').value;
-        // filtra por curso (subject/path) quando selecionado
-        let pool=qs;
-        if(courseFilter){
-          pool=qs.filter(q=>(q.subject&&q.subject.includes(courseFilter))||(q.path&&q.path.includes(courseFilter)));
-          if(pool.length<5){showToast('Poucas questões deste curso — usando todas');pool=qs;}
-        }
-        // tenta enriquecer com questões compartilhadas por outros alunos da mesma matéria
-        if(window.gdiIsaPdf && window.gdiIsaPdf.fetchSharedQuestions){
-          window.gdiIsaPdf.fetchSharedQuestions(courseFilter).then(extra=>{
-            if(extra && extra.length){
-              pool=[...pool,...extra];
-              showToast(pool.length+' questões disponíveis (incl. colegas)');
-            }
-            const shuffled=fisherYates(pool).slice(0,n);
-            startSimulado(box,shuffled,mins);
-          }).catch(()=>{
-            const shuffled=fisherYates(pool).slice(0,n);
-            startSimulado(box,shuffled,mins);
-          });
-        }else{
-          const shuffled=fisherYates(pool).slice(0,n);
-          startSimulado(box,shuffled,mins);
-        }
+        // embaralha e pega N
+        const shuffled=[...qs].sort(()=>Math.random()-0.5).slice(0,n);
+        startSimulado(box,shuffled,mins);
       };
     }
     const hist=box.querySelector('#sim-hist');
@@ -499,19 +450,11 @@
       const prev=box.querySelector('#sim-prev');if(prev)prev.onclick=()=>{idx--;draw();};
     }
     function finish(){
-      // ★ FIX: limpa timer imediatamente para evitar salvar simulado duplicado
-      if(box.__simTimer){clearInterval(box.__simTimer);box.__simTimer=null;}
       const dur=Math.round((Date.now()-t0)/1000);
       let hits=0;
       answers.forEach(a=>{if(a){gradeQ(a.id,a.acertou);if(a.acertou)hits++;}});
       const total=queue.length;
-        // ★ FIX: atualiza contador de simulados para conquistas
-        try{localStorage.setItem('gdi-simulados-count',String((window.gdiAchievements?window.gdiAchievements:undefined)||(lsGet('gdi-simulados-v1',[]).length)));}catch(_){}
-      // anti-duplicação: se já existe salvo neste segundo, pula
-      const recent=simus().find(s=>s.date>Date.now()-2000);
-      if(!recent){
-        saveSim([...simus(),{id:uid(),date:Date.now(),title:'Simulado '+queue.length+'q',duration:dur,hits,misses:total-hits,total,answers:answers.map(a=>a?a.id:null)}]);
-      }
+      saveSim([...simus(),{id:uid(),date:Date.now(),title:'Simulado '+queue.length+'q',duration:dur,hits,misses:total-hits,total,answers:answers.map(a=>a?a.id:null)}]);
       const pct=Math.round(hits/total*100);
       box.innerHTML=`<div style="text-align:center;padding:30px;">
         <div style="font-size:40px;">${pct>=60?'🎉':'📚'}</div>
@@ -650,9 +593,42 @@
   // ★ Expõe startSession no window para que o M9-ISA (botão "Resolver
   // agora →" após gerar questões) possa chamar a sessão interativa
   // diretamente sobre o bodyEl da aula, sem precisar abrir a Central.
-  
+  window.__gdiStartSession=startSession;
   // ★ Expõe gradeQ para o quiz do M9-ISA (interativo na aba de questões)
   window.__gdiGradeQ=gradeQ;
+  // ★ Expõe gradeQ para outros módulos (ex.: flashcards das erradas)
+  window.__gdiQStats=function(){
+    // retorna {perSubject:[{subject,total,hits,misses,acc}], worst:[...], overall:{...}}
+    const all=questions();
+    const srs=qSrs();
+    const bySbj={};
+    all.forEach(q=>{
+      const s=(q.subject||'—');
+      if(!bySbj[s])bySbj[s]={subject:s,total:0,hits:0,misses:0};
+      bySbj[s].total++;
+      // se a questão tem SRS, contamos como "respondida"
+      const e=srs[q.id];
+      if(e&&e.last){
+        if(e.box>0)bySbj[s].hits++; // simplificação: box>0 = acertou última
+        else bySbj[s].misses++;
+      }
+    });
+    const perSubject=Object.values(bySbj).map(x=>{
+      const answered=x.hits+x.misses;
+      x.answered=answered;
+      x.acc=answered?Math.round(x.hits/answered*100):null;
+      return x;
+    });
+    perSubject.sort((a,b)=>(a.acc==null?101:a.acc)-(b.acc==null?101:b.acc));
+    const overall={
+      total:all.length,
+      answered:perSubject.reduce((s,x)=>s+x.answered,0),
+      hits:perSubject.reduce((s,x)=>s+x.hits,0),
+      misses:perSubject.reduce((s,x)=>s+x.misses,0)
+    };
+    overall.acc=overall.answered?Math.round(overall.hits/overall.answered*100):null;
+    return {perSubject,overall,worst:perSubject.filter(x=>x.acc!=null&&x.acc<60)};
+  };
 
   console.log('[GDI Extras] M23 Estudo Ativo (questões/simulado/cronograma/revisões) ativo');
 })();
@@ -667,175 +643,9 @@
   const stripExt=s=>String(s||'').replace(/\.[a-z0-9]{1,5}$/i,'').trim();
   const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(_){return d}};
   const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}};
-  // ★ FIX: esc local para o M22 (Central de Estudos) — usa escHtml global do app.min.js quando disponível
-  const esc=s=>{try{return window.escHtml?window.escHtml(s):String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');}catch(_){return String(s||'');}};
   const fmtMin=m=>{m=Math.round(m);return m>=60?Math.floor(m/60)+'h'+String(m%60).padStart(2,'0'):m+'min'};
   const dayKey=t=>{const d=new Date(t||Date.now());return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
   const dateBr=t=>new Date(t).toLocaleDateString('pt-BR');
-
-  // ═══ HANDLER GLOBAL DE ADICIONAR CURSO (definido no carregamento do módulo) ═══
-  // Sempre disponível — não depende de showAddCourseModal ter rodado.
-  // Self-contained: usa DOM queries para achar overlay e box, sem closures.
-  // Inline onclick chama window.gdiAddCourseFromButton(this); addEventListener no document
-  // também captura cliques (fallback caso CSP bloqueie inline handlers).
-  window.gdiAddCourseFromButton=async function(btn){
-    
-    if(!btn){
-      console.error('[AddCourse] botão null');
-      return;
-    }
-    const p=btn.dataset.path||'';
-    const n=btn.dataset.name||'Pasta';
-    const pdfs=parseInt(btn.dataset.pdfs||'0',10);
-    
-    if(!p){
-      console.error('[AddCourse] data-path vazio — abortando');
-      if(window.showToast)showToast('Erro: pasta não selecionada');
-      return;
-    }
-    // ★ 1) feedback visual imediato
-    const originalText=btn.textContent;
-    btn.disabled=true;
-    btn.style.opacity='0.6';
-    btn.style.pointerEvents='none';
-    btn.innerHTML='<i class="bi bi-hourglass-split"></i> Adicionando...';
-    try{
-      // ★ 2) chamar persistência — função global self-contained
-      await window.gdiAddCourseFromDrive(p, n, pdfs);
-          }catch(err){
-      console.error('[AddCourse] ERRO:',err);
-      if(window.showToast)showToast('Erro: '+err.message);
-      // restaura botão em caso de erro
-      btn.disabled=false;
-      btn.style.opacity='1';
-      btn.style.pointerEvents='auto';
-      btn.textContent=originalText;
-    }
-  };
-
-  // ★ Função global self-contained: adiciona curso do Drive
-  // Fluxo:
-  //   1. Salva no localStorage (rápido — aparece imediatamente na lista do aluno)
-  //   2. POST /api/courses/add → salva em general_courses.json no Drive (compartilhado entre usuários)
-  //   3. Re-renderiza lista de cursos
-  //   4. Fecha modal
-  //   5. Dispara batalhão em background (não-bloqueante) → cria materiais em subpastas:
-  //      resumos/, cards/, pilulas/, questoes/, simulados/ dentro da pasta do aluno no Drive
-  window.gdiAddCourseFromDrive=async function(coursePath, courseName, pdfCount){
-    
-    const overlay=document.querySelector('.gdi-modal-overlay');
-    const box=document.getElementById('gdi-central-body');
-    const LS_MANUAL='gdi-manual-courses-v1';
-    const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(_){return d}};
-    const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}};
-
-    try{
-      const manual=lsGet(LS_MANUAL,[]);
-      const alreadyExists=manual.some(c=>c.path===coursePath);
-
-      if(!alreadyExists){
-        // ★ 1) SALVA no localStorage — aparece imediatamente na lista do aluno
-        const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
-        manual.push({
-          id:courseId,name:courseName,icon:'📁',color:'#5ddeda',
-          goal:60,notes:'',createdAt:Date.now(),
-          manual:true,path:coursePath,courseKey:coursePath
-        });
-        lsSet(LS_MANUAL,manual);
-              }else{
-              }
-
-      // ★ 2) POST /api/courses/add — salva em general_courses.json no Drive (compartilhado)
-      // Não-bloqueante: se falhar, mostra warning mas continua o fluxo
-      try{
-        const r=await fetch('/api/courses/add',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({
-            coursePath,courseName,
-            pdfCount:pdfCount||0,
-            addedAt:Date.now()
-          })
-        });
-        if(r.ok){
-          const d=await r.json().catch(()=>({}));
-          
-        }else{
-          console.warn('[AddCourse] /api/courses/add HTTP',r.status,'— continuando mesmo assim');
-        }
-      }catch(e){
-        console.warn('[AddCourse] falha ao salvar no Drive (continuando):',e.message);
-      }
-
-      // ★ 3) feedback visual: toast
-      if(window.showToast)showToast(alreadyExists
-        ? 'Curso já estava adicionado — Meggy continua trabalhando em background 🐩'
-        : 'Curso "'+courseName+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
-
-      // ★ 4) re-renderiza lista de cursos ANTES de fechar modal
-      if(box){
-        try{
-          if(typeof window.gdiRefreshCentralPanel==='function'){
-            window.gdiRefreshCentralPanel();
-                      }else if(typeof window.renderCursos==='function'){
-            window.renderCursos(box);
-                      }
-        }catch(e){console.warn('[AddCourse] erro ao re-renderizar:',e.message);}
-      }
-
-      // ★ 5) fecha modal — agora que tudo está salvo
-      if(overlay&&overlay.parentNode){
-        overlay.remove();
-              }
-
-      // ★ 6) dispara batalhão em background (não-bloqueante)
-      // O batalhão no worker vai:
-      //   - escanear coursePath via gdiListAllFiles
-      //   - para cada PDF, gerar: resumo, pílulas, questões, flashcards, simulado
-      //   - salvar cada tipo em sua respectiva subpasta na pasta do aluno no Drive:
-      //     • resumos/<course>_<date>.md       → aba Resumos
-      //     • cards/<course>_<date>.json       → aba Flashcards
-      //     • pilulas/<course>_<date>.md       → aba Pílulas
-      //     • questoes/<course>_<date>.json    → aba Questões
-      //     • simulados/<course>_<date>.json  → aba Simulados
-      //   - também salva em pool compartilhado (outros alunos com mesmo curso = cache hit)
-            try{
-        if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
-          window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
-            console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
-          });
-                  }else{
-          console.warn('[AddCourse] gdiIsaPdf.startBattalion indisponível — batalhão não disparado');
-        }
-      }catch(e){console.warn('[Batalhão] falha:',e.message);}
-
-    }catch(e){
-      console.error('[AddCourse] erro fatal em gdiAddCourseFromDrive:',e);
-      if(window.showToast)showToast('Erro ao adicionar curso: '+e.message);
-      // fecha modal mesmo com erro — não trava o aluno
-      if(overlay&&overlay.parentNode)overlay.remove();
-      throw e;
-    }
-  };
-
-  // ★ EVENT DELEGATION EM NÍVEL DE DOCUMENT (capture phase) — fallback máximo
-  // Captura QUALQUER clique em #gdi-amc-select-current, não importa onde esteja no DOM.
-  // Não depende de inline onclick (que pode ser bloqueado por CSP).
-  // Não depende de overlay (que pode ter sido removido).
-  // Definido UMA vez no carregamento do módulo.
-  if(!window.__gdiAddCourseDelegationAttached){
-    window.__gdiAddCourseDelegationAttached=true;
-    document.addEventListener('click',async(e)=>{
-      // só captura se o target for o botão Selecionar
-      const btn=e.target.closest && e.target.closest('#gdi-amc-select-current');
-      if(!btn)return;
-            e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      if(window.gdiAddCourseFromButton)window.gdiAddCourseFromButton(btn);
-    },true);  // capture phase
-      }
-
   let rescue=null,rescueAt=0;
   function ensureState(){
     if(rescue&&Date.now()-rescueAt<60000)return Promise.resolve(rescue);
@@ -883,27 +693,7 @@
     for(const k in w)add(k,w[k]&&w[k].at,true);
     for(const k in r)add(k,r[k]&&r[k].at,false);
     (Array.isArray(d.history)?d.history:[]).forEach(h=>{if(h&&h.path)add(h.path,h.at,false)});
-
-    // ★ FIX: inclui cursos manuais adicionados via "Adicionar curso" (modal de navegação do Drive)
-    // Estes ficam em gdi-manual-courses-v1 no localStorage e NÃO vinham do /userstate
-    const LS_MANUAL='gdi-manual-courses-v1';
-    const manual=lsGet(LS_MANUAL,[]);
-    for(const m of manual){
-      if(!m||!m.path)continue;
-      const ck=m.path;  // usa o path do drive como courseKey
-      if(isHidden(ck))continue;
-      let c=map.get(ck);
-      if(!c){
-        c={key:ck,lastAt:m.createdAt||Date.now(),lessons:new Set(),watched:0,manual:true,manualCourse:m};
-        map.set(ck,c);
-      }
-      // marca como curso manual para o card mostrar differently
-      c.manual=true;
-      c.manualCourse=m;
-      if(!c.lastAt)c.lastAt=m.createdAt||Date.now();
-    }
-
-    return [...map.values()].filter(c=>c.lessons.size||c.manual).sort((a,b)=>b.lastAt-a.lastAt);
+    return [...map.values()].filter(c=>c.lessons.size).sort((a,b)=>b.lastAt-a.lastAt);
   }
   // ★ helpers para ocultar/restaurar cursos
   function hideCourse(ck){
@@ -1037,7 +827,7 @@
   const saveCards=c=>lsSet(LS_CARDS,c);
   const dueCards=()=>cards().filter(c=>(c.due||0)<=Date.now());
   let FC={active:false,flip:null,grade:null};
-  let panel=null,tab='home';
+  let panel=null,tab='cursos';
   function openPanel(t){
     if(t)tab=t;
     if(!panel){
@@ -1062,91 +852,32 @@
   function renderPanel(){
     if(!panel)return;
     const t=todayMin(),g=goalMin(),pct=Math.min(100,Math.round(t/g*100));
-    // ★ calcula stats para o header (streak, cards devidos)
-    const cards=lsGet(LS_CARDS,[]);
-    const dueCount=cards.filter(c=>(c.due||0)<=Date.now()).length;
-    // streak
-    const watch=lsGet(LS_WATCH,{});
-    const acts={};const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
-    for(const k in watch){const v=watch[k];if(typeof v==='number'&&v>60)touch(new Date(k+'T12:00:00').getTime());else if(v&&v.at)touch(v.at);}
-    let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
-    if(!has(dd))dd.setDate(dd.getDate()-1);
-    while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
-
-    // ★ definição das abas agrupadas
-    const TAB_GROUPS=[
-      {label:null,tabs:[
-        {id:'home',icon:'bi-house-door',label:'Início'}
-      ]},
-      {label:'Estudar',tabs:[
-        {id:'cursos',icon:'bi-mortarboard',label:'Meus Cursos'},
-        {id:'questoes',icon:'bi-patch-question',label:'Questões'},
-        {id:'simulado',icon:'bi-stopwatch',label:'Simulado'},
-        {id:'mar',icon:'bi-rocket-takeoff',label:'Maratona'}
-      ]},
-      {label:'Revisar',tabs:[
-        {id:'revisoes',icon:'bi-clock-history',label:'Revisões'},
-        {id:'fc',icon:'bi-card-text',label:'Flashcards',badge:dueCount||null}
-      ]},
-      {label:'Organizar',tabs:[
-        {id:'subjects',icon:'bi-journal-text',label:'Matérias'},
-        {id:'trails',icon:'bi-signpost-2',label:'Trilhas'}
-      ]},
-      {label:'Materiais',tabs:[
-        {id:'addmateria',icon:'bi-folder-plus',label:'Adicionar matéria'},
-        {id:'resumos',icon:'bi-clipboard',label:'Resumos'},
-        {id:'provas',icon:'bi-file-earmark-text',label:'Provas'},
-        {id:'redacao',icon:'bi-pencil-square',label:'Redação'}
-      ]},
-      {label:'Planejar',tabs:[
-        {id:'cronograma',icon:'bi-calendar3',label:'Cronograma'},
-        {id:'stats',icon:'bi-graph-up',label:'Estatísticas'},
-        {id:'radar',icon:'bi-bullseye',label:'Mapa de Fracos'},
-        {id:'achievements',icon:'bi-trophy',label:'Conquistas'}
-      ]}
-    ];
-
     panel.innerHTML=`<div class="gdi-central-box">
       <div class="gdi-central-head">
-        <div class="gdi-central-head-title">
-          <span class="gdi-central-icon">📚</span>
-          <b>Central de Estudos</b>
-        
-    </div>
-        <div class="gdi-central-stats">
-          <span class="gdi-central-stat" title="Sequência de dias estudando">
-            <i class="bi bi-fire gdi-stat-fire"></i>
-            <b>${streak}</b><span style="color:var(--ferreto-text-muted,#8b949e);">dias</span>
-          </span>
-          <span class="gdi-central-stat" title="Tempo estudado hoje">
-            <i class="bi bi-clock gdi-stat-time"></i>
-            <b>${fmtMin(t)}</b><span style="color:var(--ferreto-text-muted,#8b949e);">/${fmtMin(g)}</span>
-          </span>
-          ${dueCount?`<span class="gdi-central-stat" title="Flashcards para revisar hoje">
-            <i class="bi bi-card-text gdi-stat-cards"></i>
-            <b>${dueCount}</b><span style="color:var(--ferreto-text-muted,#8b949e);">cards</span>
-          </span>`:''}
-        </div>
-        <input id="gdi-goal-set" type="number" min="10" max="480" value="${g}" title="Meta diária (minutos)" style="width:56px;background:var(--ferreto-surface-2,rgba(255,255,255,.07));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#f0f6fc);text-align:center;padding:5px;font-size:12px;flex-shrink:0;">
-        <button id="gdi-central-x" title="Fechar (Esc)">✕</button>
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:16px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">\ud83d\udcda Central de Estudos</b>
+        <span style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;">Meta hoje: ${fmtMin(t)}/${fmtMin(g)}</span>
+        <div style="flex:1;max-width:160px;height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.1));border-radius:3px;overflow:hidden;"><div style="height:6px;width:${pct}%;background:${t>=g?'#2f9e44':'var(--ferreto-grad)'};"></div></div>
+        <input id="gdi-goal-set" type="number" min="10" max="480" value="${g}" title="Meta di\u00e1ria (minutos)" style="width:56px;background:var(--ferreto-surface-2,rgba(255,255,255,.07));border:1px solid var(--ferreto-border,#30363d);border-radius:6px;color:var(--ferreto-text,#f0f6fc);text-align:center;padding:3px 5px;font-size:12px;">
+        <button class="gdi-mode-btn" id="gdi-central-x" style="padding:4px 10px;margin-left:auto;order:99;" title="Fechar (Esc)">\u2715</button>
       </div>
-      <div class="gdi-central-main">
-        <aside class="gdi-central-sidebar">
-          ${TAB_GROUPS.map(group=>`
-            <div class="gdi-central-sidebar-group">
-              ${group.label?`<div class="gdi-central-sidebar-label">${group.label}</div>`:''}
-              ${group.tabs.map(t=>`
-                <button class="gdi-central-tab ${tab===t.id?'active':''}" data-t="${t.id}">
-                  <i class="bi ${t.icon}"></i>
-                  <span>${t.label}</span>
-                  ${t.badge?`<span class="gdi-tab-badge">${t.badge}</span>`:''}
-                </button>
-              `).join('')}
-            </div>
-          `).join('')}
-        </aside>
-        <div class="gdi-central-body" id="gdi-central-body"></div>
+      <div class="gdi-central-tabs">
+        <button class="gdi-central-tab ${tab==='cursos'?'active':''}" data-t="cursos">\ud83d\udccd Meus Cursos</button>
+        <button class="gdi-central-tab ${tab==='questoes'?'active':''}" data-t="questoes">\u2753 Quest\u00f5es</button>
+        <button class="gdi-central-tab ${tab==='simulado'?'active':''}" data-t="simulado">\ud83c\udfaf Simulado</button>
+        <button class="gdi-central-tab ${tab==='cronograma'?'active':''}" data-t="cronograma">\ud83d\udcc5 Cronograma</button>
+        <button class="gdi-central-tab ${tab==='revisoes'?'active':''}" data-t="revisoes">\u23f0 Revis\u00f5es</button>
+        <button class="gdi-central-tab ${tab==='resumos'?'active':''}" data-t="resumos">\ud83d\udccb Resumos</button>
+        <button class="gdi-central-tab ${tab==='provas'?'active':''}" data-t="provas">\ud83d\udcc4 Provas</button>
+        <button class="gdi-central-tab ${tab==='redacao'?'active':''}" data-t="redacao">\u270d\ufe0f Reda\u00e7\u00e3o</button>
+        <button class="gdi-central-tab ${tab==='radar'?'active':''}" data-t="radar">\ud83c\udfaf Mapa de Fracos</button>
+        <button class="gdi-central-tab ${tab==='stats'?'active':''}" data-t="stats">\ud83d\udcca Estat\u00edsticas</button>
+        <button class="gdi-central-tab ${tab==='fc'?'active':''}" data-t="fc">\ud83e\uddf0 Flashcards</button>
+        <button class="gdi-central-tab ${tab==='subjects'?'active':''}" data-t="subjects">\ud83d\udcdd Mat\u00e9rias</button>
+        <button class="gdi-central-tab ${tab==='trails'?'active':''}" data-t="trails">\ud83c\udfaft Trilhas</button>
+        <button class="gdi-central-tab ${tab==='achievements'?'active':''}" data-t="achievements">\ud83c\udfc6 Conquistas</button>
+        <button class="gdi-central-tab ${tab==='mar'?'active':''}" data-t="mar">\ud83d\ude80 Maratona</button>
       </div>
+      <div class="gdi-central-body" id="gdi-central-body"></div>
     </div>`;
     panel.querySelector('#gdi-central-x').onclick=closePanel;
     panel.querySelector('#gdi-goal-set').addEventListener('change',e=>{
@@ -1160,147 +891,21 @@
       tab=b.dataset.t;FC.active=false;renderPanel();
     });
     const body=panel.querySelector('#gdi-central-body');
-    if(tab==='addmateria'){showAddCourseModal(body);return;}
-    if(tab==='home')renderHome(body);
-    else if(tab==='cursos')renderCursos(body);
+    if(tab==='cursos')renderCursos(body);
     else if(tab==='questoes')renderQuestoes(body);
     else if(tab==='simulado')renderSimulado(body);
     else if(tab==='cronograma')renderCronograma(body);
     else if(tab==='revisoes')renderRevisoes(body);
-    else if(tab==='resumos'){if(window.renderResumos)renderResumos(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">📋</span><h3>Resumos indisponíveis</h3><p>O módulo de resumos não carregou. Tente recarregar a página.</p></div>';}
-    else if(tab==='provas'){if(window.renderProvas)window.renderProvas(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">📄</span><h3>Provas indisponíveis</h3><p>O módulo de provas não carregou.</p></div>';}
-    else if(tab==='redacao'){if(window.renderRedacao)window.renderRedacao(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">✍️</span><h3>Redação indisponível</h3><p>O módulo de redação não carregou.</p></div>';}
-    else if(tab==='radar'){if(window.renderRadar)window.renderRadar(body);else body.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">🎯</span><h3>Radar indisponível</h3><p>O módulo de radar não carregou.</p></div>';}
+    else if(tab==='resumos'){if(window.renderResumos)renderResumos(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de resumos indispon\u00edvel.</div>';}
+    else if(tab==='provas'){if(window.renderProvas)window.renderProvas(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de provas indispon\u00edvel.</div>';}
+    else if(tab==='redacao'){if(window.renderRedacao)window.renderRedacao(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de reda\u00e7\u00e3o indispon\u00edvel.</div>';}
+    else if(tab==='radar'){if(window.renderRadar)window.renderRadar(body);else body.innerHTML='<div class="gdi-notes-empty">M\u00f3dulo de radar indispon\u00edvel.</div>';}
     else if(tab==='stats')renderStats(body);
     else if(tab==='fc')renderFlash(body);
     else if(tab==='subjects')renderSubjects(body);
     else if(tab==='trails')renderTrails(body);
     else if(tab==='achievements')renderAchievements(body);
     else renderMarathon(body);
-  }
-
-  // ★ Dashboard "Início" — visão geral com atalhos
-  function renderHome(box){
-    const t=todayMin(),g=goalMin(),pct=Math.min(100,Math.round(t/g*100));
-    const cards=lsGet(LS_CARDS,[]);
-    const dueCount=cards.filter(c=>(c.due||0)<=Date.now()).length;
-    const courses=collectCourses();
-    const subjects=(window.gdiSubjects?window.gdiSubjects.get():[]).length;
-    const trails=(window.gdiTrails?window.gdiTrails.get():[]).length;
-    const achievements=window.gdiAchievements?window.gdiAchievements.getUnlocked().length:0;
-    const totalAchievements=window.gdiAchievements?window.gdiAchievements.defs().length:0;
-    const hour=new Date().getHours();
-    const greeting=hour<12?'Bom dia':hour<18?'Boa tarde':'Boa noite';
-
-    box.innerHTML=`
-      <div class="gdi-dashboard-hero">
-        <h2>${greeting}! 👋</h2>
-        <p>${t>=g?'<b style="color:#3fb950;">Meta batida hoje!</b> Parabéns, continue assim. 🎉':'Continue estudando para bater sua meta diária.'}</p>
-        <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          <div style="flex:1;min-width:200px;">
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ferreto-text-muted,#8b949e);margin-bottom:4px;">
-              <span>Progresso de hoje</span>
-              <span><b style="color:var(--ferreto-text,#f0f6fc);">${fmtMin(t)}</b> / ${fmtMin(g)}</span>
-            </div>
-            <div class="gdi-progress-bar" style="margin:0;"><div class="gdi-progress-fill" style="width:${pct}%;${t>=g?'background:#3fb950':''}"></div></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="gdi-dashboard-grid">
-        <div class="gdi-dashboard-card" data-action="fc">
-          <span class="gdi-dashboard-card-icon">🃏</span>
-          <span class="gdi-dashboard-card-num">${dueCount}</span>
-          <span class="gdi-dashboard-card-label">Cards para revisar</span>
-          <span class="gdi-dashboard-card-meta">${cards.length} cards no total</span>
-        </div>
-        <div class="gdi-dashboard-card" data-action="cursos">
-          <span class="gdi-dashboard-card-icon">📚</span>
-          <span class="gdi-dashboard-card-num">${courses.length}</span>
-          <span class="gdi-dashboard-card-label">Cursos em andamento</span>
-          <span class="gdi-dashboard-card-meta">${courses.filter(c=>c.watched>0).length} com progresso</span>
-        </div>
-        <div class="gdi-dashboard-card" data-action="subjects">
-          <span class="gdi-dashboard-card-icon">📝</span>
-          <span class="gdi-dashboard-card-num">${subjects}</span>
-          <span class="gdi-dashboard-card-label">Matérias</span>
-          <span class="gdi-dashboard-card-meta">${trails} trilhas ativas</span>
-        </div>
-        <div class="gdi-dashboard-card" data-action="achievements">
-          <span class="gdi-dashboard-card-icon">🏆</span>
-          <span class="gdi-dashboard-card-num">${achievements}</span>
-          <span class="gdi-dashboard-card-label">Conquistas</span>
-          <span class="gdi-dashboard-card-meta">de ${totalAchievements} possíveis</span>
-        </div>
-      </div>
-
-      <div style="margin-bottom:20px;">
-        <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;margin-bottom:10px;">Atalhos rápidos</b>
-        <div class="gdi-quick-actions">
-          <button class="gdi-quick-action" data-action="fc"><i class="bi bi-card-text"></i> Estudar flashcards</button>
-          <button class="gdi-quick-action" data-action="cursos"><i class="bi bi-mortarboard"></i> Continuar curso</button>
-          <button class="gdi-quick-action" data-action="questoes"><i class="bi bi-patch-question"></i> Resolver questões</button>
-          <button class="gdi-quick-action" data-action="simulado"><i class="bi bi-stopwatch"></i> Fazer simulado</button>
-          <button class="gdi-quick-action" data-action="subjects"><i class="bi bi-journal-text"></i> Gerenciar matérias</button>
-          <button class="gdi-quick-action" data-action="resumos"><i class="bi bi-clipboard"></i> Ver resumos</button>
-        </div>
-      </div>
-
-      ${courses.length?`
-      <div>
-        <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;margin-bottom:10px;">Continue de onde parou</b>
-        <div class="gdi-courses">
-          ${courses.slice(0,3).map(c=>{
-            const name=cleanCourseName(c.key);
-            const drive=driveNameOf(c.key);
-            const progress=c.lessons.size>0?Math.round(c.watched/c.lessons.size*100):0;
-            const progressColor=progress>=80?'#3fb950':progress>=40?'#ffd43b':'var(--ferreto-primary,#ff8b9f)';
-            return `<div class="gdi-course" data-course-key="${escHtml(c.key)}" style="cursor:pointer;">
-              <b title="${escHtml(courseName(c.key))}">${escHtml(name)}</b>
-              ${drive?`<small><i class="bi bi-hdd"></i> ${escHtml(drive)}</small>`:'<small>&nbsp;</small>'}
-              <div class="gdi-course-stats">
-                <div class="gdi-course-stat"><span class="gdi-course-stat-num">${c.lessons.size}</span><span class="gdi-course-stat-label">Aulas</span></div>
-                <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#3fb950;">${c.watched}</span><span class="gdi-course-stat-label">Feitas</span></div>
-                <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">${c.lessons.size-c.watched}</span><span class="gdi-course-stat-label">Restam</span></div>
-                <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:${progressColor};">${progress}%</span><span class="gdi-course-stat-label">Concl.</span></div>
-              </div>
-              <div class="gdi-progress-bar"><div class="gdi-progress-fill" style="width:${progress}%;background:${progressColor};"></div></div>
-              <button class="gdi-btn-continue" disabled><i class="bi bi-hourglass-split"></i> Verificando…</button>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`:''}
-    `;
-
-    // bind quick actions
-    box.querySelectorAll('[data-action]').forEach(el=>{
-      el.onclick=()=>{
-        tab=el.dataset.action;
-        renderPanel();
-      };
-    });
-    // bind course cards (continue)
-    box.querySelectorAll('[data-course-key]').forEach(card=>{
-      const ck=card.dataset.courseKey;
-      const contBtn=card.querySelector('.gdi-btn-continue');
-      bestIn(ck).then(target=>{
-        if(target){
-          contBtn.disabled=false;
-          contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
-          contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
-        }else{
-          contBtn.disabled=true;
-          contBtn.className='gdi-btn-continue gdi-btn-done';
-          contBtn.innerHTML='<i class="bi bi-check2-all"></i> Tudo em dia!';
-        }
-      });
-      card.onclick=(e)=>{
-        if(e.target.closest('button'))return;
-        // abre detalhe do curso
-        const c=courses.find(x=>x.key===ck);
-        if(c)openCourseDetail(box,c);
-      };
-    });
   }
 
   // ★ Aba "Trilhas" — agrupar cursos em uma meta
@@ -1486,13 +1091,10 @@
         list.innerHTML='<div class="gdi-notes-empty" style="padding:40px;text-align:center;"><i class="bi bi-journal-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma matéria criada ainda.<br><span style="font-size:12px;">Clique em "Nova matéria" para começar.</span></div>';
         return;
       }
-      // contar cards por matéria (★ FIX: cards usam .path, não .subject)
+      // contar cards por matéria
       const cards=lsGet('gdi-cards-v1',[]);
       const countByName={};
-      cards.forEach(c=>{
-        const s=c.subject||(c.path?c.path.split('/').filter(Boolean).pop():'')||'';
-        if(s)countByName[s]=(countByName[s]||0)+1;
-      });
+      cards.forEach(c=>{if(c.subject)countByName[c.subject]=(countByName[c.subject]||0)+1;});
       list.innerHTML='';
       all.forEach(s=>{
         const count=countByName[s.name]||0;
@@ -1620,20 +1222,15 @@
     const cs=collectCourses();
     const hidden=listHiddenCourses();
     if(!cs.length){
-      box.innerHTML=`<div class="gdi-empty-state">
-        <span class="gdi-empty-state-icon">🎓</span>
-        <h3>Nenhum estudo registrado ainda</h3>
-        <p>Assista uma aula para que ela apareça aqui automaticamente, ou crie um curso manual para organizar seus estudos.</p>
-        <div class="gdi-quick-actions" style="justify-content:center;margin-bottom:20px;">
-          <button id="gdi-empty-add-course" class="gdi-quick-action"><i class="bi bi-plus-lg"></i> Adicionar curso manual</button>
-        </div>
-        ${hidden.length?`<div style="margin-top:24px;padding:14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);border-radius:10px;text-align:left;max-width:400px;margin-left:auto;margin-right:auto;">
+      box.innerHTML=`<div class="gdi-notes-empty" style="padding:60px;text-align:center;">
+        <i class="bi bi-mortarboard" style="font-size:48px;display:block;margin-bottom:14px;color:var(--ferreto-text-faint,#6b7488);"></i>
+        Nenhum estudo registrado ainda.<br>
+        <span style="font-size:12px;">Assista uma aula para começar!</span>
+        ${hidden.length?`<div style="margin-top:24px;padding:14px;background:var(--ferreto-surface-2,#161b22);border:1px solid var(--ferreto-border,#21262d);border-radius:10px;text-align:left;">
           <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;display:block;margin-bottom:8px;"><i class="bi bi-eye-slash"></i> ${hidden.length} curso${hidden.length>1?'s':''} oculto${hidden.length>1?'s':''}</b>
           <button id="gdi-restore-courses" class="gdi-mode-btn" style="font-size:12px;"><i class="bi bi-arrow-counterclockwise"></i> Restaurar cursos ocultos</button>
         </div>`:''}
       </div>`;
-      const emptyAdd=box.querySelector('#gdi-empty-add-course');
-      if(emptyAdd)emptyAdd.onclick=()=>showAddCourseModal(box);
       const restoreBtn=box.querySelector('#gdi-restore-courses');
       if(restoreBtn)restoreBtn.onclick=async ()=>{
         const ok=await window.gdiModal({
@@ -1707,67 +1304,37 @@
       }
     }
     function renderCourseCard(grid,c,box){
-      // ★ FIX: cursos manuais usam dados do manualCourse (nome, ícone, cor)
-      const mc=c.manualCourse||{};
-      const name=mc.name||cleanCourseName(c.key);
+      const name=cleanCourseName(c.key);
       const drive=driveNameOf(c.key);
-      const icon=mc.icon||'📁';
-      const color=mc.color||'var(--ferreto-primary,#ff8b9f)';
-      const isManual=c.manual===true;
       const progress=c.lessons.size>0?Math.round(c.watched/c.lessons.size*100):0;
       const progressColor=progress>=80?'#3fb950':progress>=40?'#ffd43b':'var(--ferreto-primary,#ff8b9f)';
-      const remaining=c.lessons.size-c.watched;
       const el=document.createElement('div');el.className='gdi-course';
       el.style.cursor='pointer';
-      // ★ destaque visual para curso manual: border-left com a cor do manualCourse
-      if(isManual)el.style.borderLeft='4px solid '+color;
       el.innerHTML=`
         <div class="gdi-course-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <b title="${escHtml(mc.name||courseName(c.key))}" style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;">
-            ${isManual?`<span style="font-size:18px;flex:none;">${icon}</span>`:''}
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(name)}</span>
-          </b>
-          <button class="gdi-course-remove" title="${isManual?'Remover curso manual':'Ocultar curso'}" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:14px;padding:2px 6px;flex:none;border-radius:6px;transition:all .15s;"><i class="bi bi-x-lg"></i></button>
+          <b title="${escHtml(courseName(c.key))}" style="flex:1;min-width:0;">${escHtml(name)}</b>
+          <button class="gdi-course-remove" title="Ocultar curso" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:14px;padding:2px 6px;flex:none;border-radius:6px;transition:all .15s;"><i class="bi bi-x-lg"></i></button>
         </div>
-        ${isManual
-          ? `<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:4px;"><i class="bi bi-hdd"></i> ${escHtml(drive||'Drive')} · <span style="color:#ffd43b;"><i class="bi bi-hourglass-split"></i> Meggy processando…</span></small>`
-          : (drive?`<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:2px;"><i class="bi bi-hdd"></i> ${escHtml(drive)}${c.lastAt?` · última: ${dateBr(c.lastAt)}`:''}</small>`:'<small>&nbsp;</small>')
-        }
-        <div class="gdi-course-stats">
-          ${isManual
-            ? `<div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">…</span><span class="gdi-course-stat-label">Batalhão</span></div>
-               <div class="gdi-course-stat"><span class="gdi-course-stat-num">0</span><span class="gdi-course-stat-label">Assistidas</span></div>`
-            : `<div class="gdi-course-stat"><span class="gdi-course-stat-num">${c.lessons.size}</span><span class="gdi-course-stat-label">Aulas</span></div>
-               <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#3fb950;">${c.watched}</span><span class="gdi-course-stat-label">Feitas</span></div>
-               <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:#ffd43b;">${remaining}</span><span class="gdi-course-stat-label">Restam</span></div>
-               <div class="gdi-course-stat"><span class="gdi-course-stat-num" style="color:${progressColor};">${progress}%</span><span class="gdi-course-stat-label">Concl.</span></div>`
-          }
-        </div>
-        ${isManual?'':`<div class="gdi-progress-bar"><div class="gdi-progress-fill" style="width:${progress}%;background:${progressColor};"></div></div>`}
-        <button class="gdi-btn-continue gdi-course-continue" ${isManual?'':'disabled'}>
-          ${isManual?'<i class="bi bi-hourglass-split"></i> Meggy preparando materiais…':'<i class="bi bi-hourglass-split"></i> Verificando…'}
-        </button>`;
+        ${drive?`<small style="color:var(--ferreto-secondary,#5ddeda);font-size:10px;display:block;margin-top:2px;"><i class="bi bi-hdd"></i> ${escHtml(drive)}</small>`:''}
+        <small>${c.lessons.size} aula${c.lessons.size>1?'s':''}${c.watched?` · <b style="color:#3fb950;">${c.watched} ✓</b>`:''} · última: ${c.lastAt?dateBr(c.lastAt):'—'}</small>
+        ${c.lessons.size>0?`<div style="height:5px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;margin:8px 0 12px;"><div style="height:5px;width:${progress}%;background:${progressColor};border-radius:3px;transition:width .3s;"></div></div>
+        <small style="color:var(--ferreto-text-muted,#8b949e);font-size:10px;display:block;margin-bottom:8px;">${progress}% concluído</small>`:''}
+        <button class="gdi-btn gdi-btn-primary gdi-course-continue" style="font-size:12px;width:100%;justify-content:center;" disabled><i class="bi bi-hourglass-split"></i> Verificando…</button>`;
       grid.appendChild(el);
 
       const contBtn=el.querySelector('.gdi-course-continue');
-      if(isManual){
-        // curso manual: clicar leva ao path no drive
-        contBtn.disabled=false;
-        contBtn.innerHTML=`<i class="bi bi-folder2-open"></i> Abrir pasta no Drive`;
-        contBtn.onclick=(e)=>{e.stopPropagation();location.href=c.key;};
-      }else{
-        bestIn(c.key).then(target=>{
-          if(target){
-            contBtn.disabled=false;
-            contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
-            contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
-          }else{
-            contBtn.disabled=true;
-            contBtn.className='gdi-btn-continue gdi-btn-done';
-            contBtn.innerHTML='<i class="bi bi-check2-all"></i> Tudo em dia!';
-          }
-        });
-      }
+      bestIn(c.key).then(target=>{
+        if(target){
+          contBtn.disabled=false;
+          contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
+          contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
+        }else{
+          contBtn.disabled=true;
+          contBtn.className='gdi-mode-btn gdi-course-continue';
+          contBtn.style.width='100%';contBtn.style.justifyContent='center';
+          contBtn.innerHTML='<i class="bi bi-check2-all" style="color:#3fb950;"></i> Tudo em dia!';
+        }
+      });
 
       // botão remover
       const removeBtn=el.querySelector('.gdi-course-remove');
@@ -1814,397 +1381,52 @@
 
   // ★ Modal para adicionar curso manualmente
   function showAddCourseModal(box){
-    // ★ FIX local: garante esc() disponível mesmo se o escopo externo não tiver
-    const esc=window.escHtml||(s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;'));
     const colors=['#ff8b9f','#5ddeda','#c026d3','#3fb950','#ffd43b','#7aa2ff','#ff6b6b','#a78bfa'];
     const icons=['⚖️','📐','📚','🎯','🧮','📖','🔬','💼','🌍','🏛️','⚙️','🎵'];
-    // ★ NOVO: navegador de Drive interno (usa gdiListAllFiles do host)
-    // Permite navegar pelas pastas do Google Drive e selecionar a que o aluno quer
-    // como curso. Ao confirmar, dispara o Batalhão de IA em background.
+    const html=`<div style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome do curso *</label>
+        <input id="gdi-amc-name" placeholder="Ex: Direito Constitucional para Concurso" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
+        <div id="gdi-amc-icons" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${icons.map((ic,i)=>`<button class="gdi-amc-icon-btn" data-icon="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}
+        </div>
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
+        <div id="gdi-amc-colors" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${colors.map((c,i)=>`<button class="gdi-amc-color-btn" data-color="${c}" style="background:${c};border:2px solid transparent;border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}
+        </div>
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
+        <input id="gdi-amc-goal" type="number" min="10" max="480" value="60" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
+      </div>
+      <div>
+        <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
+        <textarea id="gdi-amc-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;"></textarea>
+      </div>
+    </div>`;
+    // cria overlay custom (gdiModal só suporta 1 input, então fazemos manual)
     const overlay=document.createElement('div');
     overlay.className='gdi-modal-overlay';
     overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;';
-    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6);">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);">
-        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);"><i class="bi bi-folder-plus"></i> Adicionar curso</b>
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);position:sticky;top:0;background:var(--ferreto-bg-2,#0d1119);z-index:1;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">+ Adicionar curso manual</b>
         <button id="gdi-amc-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;">✕</button>
       </div>
-      <!-- Tabs: Navegar Drive | Manual -->
-      <div style="display:flex;gap:2px;padding:10px 20px 0;border-bottom:1px solid var(--ferreto-border,#21262d);">
-        <button id="tab-drive" class="gdi-amc-tab" style="flex:1;padding:8px;border:0;background:var(--ferreto-surface-3,rgba(255,255,255,.08));color:var(--ferreto-text,#f0f6fc);cursor:pointer;font-size:13px;border-radius:8px 8px 0 0;font-weight:600;border-bottom:2px solid var(--ferreto-primary,#ff8b9f);">📂 Navegar Drive</button>
-        <button id="tab-manual" class="gdi-amc-tab" style="flex:1;padding:8px;border:0;background:transparent;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:13px;border-radius:8px 8px 0 0;">✏️ Manual</button>
-      </div>
-      <div style="flex:1;overflow-y:auto;padding:16px 20px;">
-        <!-- Painel Drive -->
-        <div id="panel-drive">
-          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0 0 10px;line-height:1.5;">Navegue pelas pastas do Drive e clique em <b style="color:var(--ferreto-primary,#ff8b9f);">"Selecionar esta pasta"</b> para adicionar como curso. A Meggy vai ler os PDFs e vídeos automaticamente em background.</p>
-          <!-- Breadcrumb -->
-          <div id="gdi-amc-bc" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:8px 10px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;margin-bottom:10px;font-size:12px;"></div>
-          <!-- Loading -->
-          <div id="gdi-amc-loading" style="display:none;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><div class="gdi-spinner" style="margin:0 auto 10px;"></div>Carregando pastas...</div>
-          <!-- Lista de pastas — sem max-height! O body do modal já scrola -->
-          <div id="gdi-amc-folders" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;padding:4px;"></div>
-          <!-- Pasta atual info -->
-          <div id="gdi-amc-current-info" style="display:none;margin-top:14px;padding:12px;background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.04));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:10px;"></div>
-        </div>
-        <!-- Painel Manual (oculto por padrão) -->
-        <div id="panel-manual" style="display:none;flex-direction:column;gap:14px;">
-          <div>
-            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Nome do curso *</label>
-            <input id="gdi-amc-name" placeholder="Ex: Direito Constitucional para Concurso" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
-          </div>
-          <div>
-            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Ícone</label>
-            <div id="gdi-amc-icons" style="display:flex;gap:6px;flex-wrap:wrap;">
-              ${icons.map((ic,i)=>`<button class="gdi-amc-icon-btn" data-icon="${ic}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;padding:8px 10px;font-size:18px;cursor:pointer;">${ic}</button>`).join('')}
-            </div>
-          </div>
-          <div>
-            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Cor</label>
-            <div id="gdi-amc-colors" style="display:flex;gap:6px;flex-wrap:wrap;">
-              ${colors.map((c,i)=>`<button class="gdi-amc-color-btn" data-color="${c}" style="background:${c};border:2px solid transparent;border-radius:50%;width:32px;height:32px;cursor:pointer;"></button>`).join('')}
-            </div>
-          </div>
-          <div>
-            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Meta diária (minutos)</label>
-            <input id="gdi-amc-goal" type="number" min="10" max="480" value="60" style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;">
-          </div>
-          <div>
-            <label style="display:block;color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Observações (opcional)</label>
-            <textarea id="gdi-amc-notes" placeholder="Ex: Prova em dezembro, banca CESPE..." style="width:100%;box-sizing:border-box;background:var(--ferreto-surface-2,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);border-radius:8px;color:var(--ferreto-text,#e6edf3);padding:10px 12px;font-size:14px;font-family:inherit;min-height:60px;resize:vertical;"></textarea>
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;border-top:1px solid var(--ferreto-border,#21262d);padding-top:14px;">
+      <div style="padding:20px;">${html}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:0 20px 16px;position:sticky;bottom:0;background:var(--ferreto-bg-2,#0d1119);">
         <button id="gdi-amc-cancel" class="gdi-mode-btn" style="font-size:13px;">Cancelar</button>
-        <button id="gdi-amc-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">📂 Selecionar esta pasta</button>
+        <button id="gdi-amc-save" style="font-size:13px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;">Salvar curso</button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
-
-    // ── Estado do navegador ──
     let selectedIcon=icons[0];
     let selectedColor=colors[0];
-    let currentMode='drive';  // 'drive' | 'manual'
-    let currentPath='/';      // path atual do navegador
-    let selectedPath=null;    // path selecionado pelo aluno
-    let selectedName=null;
-
-    // ── Tabs ──
-    const tabDrive=overlay.querySelector('#tab-drive');
-    const tabManual=overlay.querySelector('#tab-manual');
-    const panelDrive=overlay.querySelector('#panel-drive');
-    const panelManual=overlay.querySelector('#panel-manual');
-    const saveBtn=overlay.querySelector('#gdi-amc-save');
-    function setMode(m){
-      currentMode=m;
-      if(m==='drive'){
-        tabDrive.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';
-        tabDrive.style.color='var(--ferreto-text,#f0f6fc)';
-        tabDrive.style.borderBottom='2px solid var(--ferreto-primary,#ff8b9f)';
-        tabDrive.style.fontWeight='600';
-        tabManual.style.background='transparent';
-        tabManual.style.color='var(--ferreto-text-muted,#8b949e)';
-        tabManual.style.borderBottom='0';
-        tabManual.style.fontWeight='400';
-        panelDrive.style.display='block';
-        panelManual.style.display='none';
-        saveBtn.textContent='📂 Selecionar esta pasta';
-        if(selectedPath)saveBtn.textContent='✓ Adicionar "'+(selectedName||selectedPath).slice(0,30)+'"';
-        else saveBtn.textContent='📂 Selecionar esta pasta';
-      }else{
-        tabManual.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';
-        tabManual.style.color='var(--ferreto-text,#f0f6fc)';
-        tabManual.style.borderBottom='2px solid var(--ferreto-primary,#ff8b9f)';
-        tabManual.style.fontWeight='600';
-        tabDrive.style.background='transparent';
-        tabDrive.style.color='var(--ferreto-text-muted,#8b949e)';
-        tabDrive.style.borderBottom='0';
-        tabDrive.style.fontWeight='400';
-        panelDrive.style.display='none';
-        panelManual.style.display='flex';
-        saveBtn.textContent='💾 Salvar curso manual';
-      }
-    }
-    tabDrive.onclick=()=>setMode('drive');
-    tabManual.onclick=()=>setMode('manual');
-    setMode('drive');
-
-    // ── Navegador de Drive ──
-    const bcEl=overlay.querySelector('#gdi-amc-bc');
-    const foldersEl=overlay.querySelector('#gdi-amc-folders');
-    const loadingEl=overlay.querySelector('#gdi-amc-loading');
-    const currentInfoEl=overlay.querySelector('#gdi-amc-current-info');
-
-    function normPath(p){return p||'/';}
-    function pathSegments(p){
-      // /0:/Cursos/Direito/Constitucional → ['0:', 'Cursos', 'Direito', 'Constitucional']
-      return normPath(p).split('/').filter(Boolean);
-    }
-    function getDriveName(seg){
-      // seg = '0:' → retorna nome do drive
-      const m=seg.match(/^(\d+):$/);
-      if(m&&window.drive_names)return window.drive_names[+m[1]]||seg;
-      return seg;
-    }
-    function isFolder(file){
-      return file && (file.mimeType==='application/vnd.google-apps.folder' || file.type==='folder' || (file.dir===true) || (file.mimeType&&file.mimeType.includes('folder')));
-    }
-    function getFolderPath(file){
-      // Tenta file.path, file.id, file.parentPath, etc
-      if(file.path)return file.path;
-      if(file.parentPath&&file.name)return file.parentPath+'/'+encodeURIComponent(file.name);
-      if(file.fullPath)return file.fullPath;
-      return null;
-    }
-    function getFileName(file){return file.name||file.title||file.originalName||'pasta';}
-
-    function renderBreadcrumb(){
-      const segs=pathSegments(currentPath);
-      let html=`<span class="gdi-amc-bc-item" data-p="/" style="cursor:pointer;color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-house"></i> Home</span>`;
-      let acc='';
-      for(const s of segs){
-        acc+='/'+s;
-        const display=decodeURIComponent(getDriveName(s));
-        html+=`<span style="color:var(--ferreto-text-faint,#6b7488);">/</span><span class="gdi-amc-bc-item" data-p="${esc(acc)}" style="cursor:pointer;color:var(--ferreto-text,#e6edf3);">${esc(display)}</span>`;
-      }
-      bcEl.innerHTML=html;
-      bcEl.querySelectorAll('.gdi-amc-bc-item').forEach(el=>{
-        el.onclick=()=>navigate(el.dataset.p);
-      });
-    }
-
-    // ★ FIX: Normaliza path para sempre ter / no final de drive (ex: /0: → /0:/)
-    // Sem isso, gdiListAllFiles faz fetch('/0:') que retorna 404/vazio
-    function normalizeNavPath(p){
-      if(!p||p==='/')return '/';
-      // /0: → /0:/
-      if(/^\/\d+:$/.test(p))return p+'/';
-      // /0:/path → /0:/path/  (garante trailing slash)
-      // Não forçamos trailing em paths longos — só em drives root
-      return p;
-    }
-    async function navigate(path){
-      currentPath=normalizeNavPath(normPath(path));
-      renderBreadcrumb();
-      loadingEl.style.display='block';
-      foldersEl.innerHTML='';
-      currentInfoEl.style.display='none';
-      try{
-        // ★ ESTRATÉGIA: chama gdiListAllFiles (faz POST no path com paginação)
-        // Se falhar ou retornar vazio, faz fetch direto como fallback
-        const pw=window.gdiGetPw?window.gdiGetPw():'';
-        let allFiles=[];
-        // 1ª tentativa: gdiListAllFiles do host
-        if(window.gdiListAllFiles){
-          try{
-            
-            const result=await window.gdiListAllFiles(currentPath, pw);
-            if(Array.isArray(result))allFiles=result;
-          }catch(e){console.warn('[AddCourse] gdiListAllFiles falhou:',e.message);}
-        }
-        // 2ª tentativa: fetch direto (mesmo formato do host)
-        if(!allFiles.length && currentPath!=='/'){
-                    try{
-            const ctrl=new AbortController();
-            const to=setTimeout(()=>ctrl.abort(),15000);
-            const r=await fetch(currentPath,{
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({password:pw||'',page_token:'',page_index:0}),
-              signal:ctrl.signal
-            });
-            clearTimeout(to);
-            if(r.ok){
-              const d=await r.json();
-              if(d&&d.data&&Array.isArray(d.data.files))allFiles=d.data.files;
-                          }else{
-              console.warn('[AddCourse] fetch direto HTTP',r.status);
-            }
-          }catch(e){console.warn('[AddCourse] fetch direto falhou:',e.message);}
-        }
-        // Filtra só folders + arquivos relevantes
-        const seen=new Set();
-        const folders=[];
-        const pdfs=[];
-        const videos=[];
-        for(const f of allFiles){
-          if(!f)continue;
-          if(isFolder(f)){
-            const fn=getFileName(f);
-            // ★ FIX: muitos workers não retornam .path no file — monta path relativo
-            const fp=getFolderPath(f);
-            // dedup por nome dentro da pasta atual
-            const k=fp+'|'+fn;
-            if(seen.has(k))continue;
-            seen.add(k);
-            folders.push(f);
-          }else if(f.mimeType&&(f.mimeType.includes('pdf')||f.mimeType.includes('video'))){
-            if(f.mimeType.includes('pdf'))pdfs.push(f);
-            if(f.mimeType.includes('video'))videos.push(f);
-          }
-        }
-        loadingEl.style.display='none';
-        // ★ Debug log visível no console
-                if(!folders.length && !pdfs.length && !videos.length){
-          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhum arquivo encontrado aqui.<br><span style="font-size:11px;color:var(--ferreto-text-faint,#6b7488);">Verifique se o caminho existe ou se você está logado.</span></div>';
-        }else if(!folders.length){
-          // pasta folha — só arquivos
-          foldersEl.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--ferreto-text-muted,#8b949e);font-size:13px;"><i class="bi bi-folder2-open" style="font-size:32px;display:block;margin-bottom:8px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhuma subpasta aqui.<br>Esta é uma pasta folha — você pode selecioná-la como curso abaixo.</div>';
-          // mostra os arquivos como info
-          const filesInfo=document.createElement('div');
-          filesInfo.style.cssText='grid-column:1/-1;display:flex;flex-direction:column;gap:4px;padding:8px;';
-          pdfs.slice(0,10).forEach(p=>{
-            const row=document.createElement('div');
-            row.style.cssText='font-size:11px;color:var(--ferreto-text-muted,#8b949e);padding:4px 8px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border-radius:6px;';
-            row.innerHTML='<i class="bi bi-file-earmark-pdf" style="color:#ff6b6b;"></i> '+esc(getFileName(p));
-            filesInfo.appendChild(row);
-          });
-          videos.slice(0,10).forEach(v=>{
-            const row=document.createElement('div');
-            row.style.cssText='font-size:11px;color:var(--ferreto-text-muted,#8b949e);padding:4px 8px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border-radius:6px;';
-            row.innerHTML='<i class="bi bi-camera-video" style="color:#5ddeda;"></i> '+esc(getFileName(v));
-            filesInfo.appendChild(row);
-          });
-          foldersEl.appendChild(filesInfo);
-        }else{
-          foldersEl.innerHTML=folders.slice(0,200).map(f=>{
-            const fp=getFolderPath(f);
-            const fn=getFileName(f);
-            // ★ FIX: monta target path robusto. Se file tem .path, usa. Senão monta com currentPath + nome
-            let target;
-            if(fp){
-              target=fp;
-            }else{
-              // garante trailing slash no currentPath antes de append
-              const base=currentPath.endsWith('/')?currentPath:currentPath+'/';
-              target=base+encodeURIComponent(fn);
-            }
-            // garante que target também é um path válido (termina com / se for folder)
-            if(!target.endsWith('/'))target=target+'/';
-            return `<div class="gdi-amc-folder-card" data-p="${esc(target)}" data-n="${esc(fn)}" style="padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;transition:all .15s;">
-              <div style="display:flex;align-items:center;gap:8px;">
-                <i class="bi bi-folder-fill" style="color:var(--ferreto-secondary,#5ddeda);font-size:18px;flex:none;"></i>
-                <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(fn)}</b>
-                <i class="bi bi-chevron-right" style="color:var(--ferreto-text-faint,#6b7488);font-size:12px;flex:none;"></i>
-              </div>
-            </div>`;
-          }).join('');
-          foldersEl.querySelectorAll('.gdi-amc-folder-card').forEach(card=>{
-            card.onmouseenter=()=>{card.style.borderColor='var(--ferreto-primary,#ff8b9f)';card.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';};
-            card.onmouseleave=()=>{card.style.borderColor='var(--ferreto-border,#30363d)';card.style.background='var(--ferreto-surface-2,rgba(255,255,255,.04))';};
-            card.onclick=()=>navigate(card.dataset.p);
-          });
-        }
-        // mostra info da pasta atual
-        const totalPdfs=pdfs.length;
-        const totalVideos=videos.length;
-        if(currentPath!=='/'){
-          const segs=pathSegments(currentPath);
-          const courseName=decodeURIComponent(getDriveName(segs[segs.length-1]));
-          selectedPath=currentPath;
-          selectedName=courseName;
-          currentInfoEl.style.display='block';
-          // ★ INLINE ONCLICK + função global: máximo de robustez — não depende de closure nem event delegation
-          currentInfoEl.innerHTML=`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-            <div style="font-size:30px;flex:none;">📁</div>
-            <div style="flex:1;min-width:200px;">
-              <b style="color:var(--ferreto-text,#f0f6fc);font-size:14px;">${esc(courseName)}</b>
-              <div style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin-top:4px;">${totalPdfs} PDF(s) · ${totalVideos} vídeo(s) nesta pasta</div>
-              <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:2px;font-family:'JetBrains Mono',monospace;word-break:break-all;">${esc(currentPath)}</div>
-            </div>
-            <button id="gdi-amc-select-current" type="button" onclick="window.gdiAddCourseFromButton(this)" data-path="${esc(currentPath)}" data-name="${esc(courseName)}" data-pdfs="${totalPdfs}" style="padding:10px 18px;border-radius:8px;border:0;cursor:pointer;font-weight:600;background:var(--ferreto-grad);color:#fff;font-size:13px;flex:none;pointer-events:auto;">✓ Selecionar esta pasta</button>
-          </div>`;
-          // ★ EVENT DELEGATION: handler anexado ao overlay, captura cliques no botão
-          // não importa quantas vezes o botão for recriado por navigate()
-          // (onclick pode ser perdido quando innerHTML é redefinido; addEventListener no parent não)
-          // Não precisamos anexar aqui — o handler está no overlay (definido uma vez abaixo)
-          saveBtn.textContent='✓ Adicionar "'+courseName.slice(0,30)+'"';
-        }else{
-          selectedPath=null;
-          selectedName=null;
-          currentInfoEl.style.display='none';
-          saveBtn.textContent='📂 Selecione uma pasta primeiro';
-        }
-      }catch(e){
-        console.error('[AddCourse] erro ao navegar:',e);
-        loadingEl.style.display='none';
-        foldersEl.innerHTML='<div style="grid-column:1/-1;padding:20px;text-align:center;color:#ff8b8b;font-size:13px;">Erro: '+esc(e.message)+'</div>';
-      }
-    }
-
-    // ── Adiciona curso a partir de pasta selecionada no Drive ──
-    async function doAddCourseFromDrive(coursePath, courseName, pdfCount){
-      
-      try{
-        const LS_MANUAL='gdi-manual-courses-v1';
-        const manual=lsGet(LS_MANUAL,[]);
-        // evita duplicar
-        if(manual.some(c=>c.path===coursePath)){
-                    showToast('Curso "'+courseName+'" já está adicionado');
-          return;
-        }
-        const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
-        manual.push({
-          id:courseId,name:courseName,icon:'📁',color:'#5ddeda',
-          goal:60,notes:'',createdAt:Date.now(),
-          manual:true,path:coursePath,courseKey:coursePath
-        });
-        lsSet(LS_MANUAL,manual);
-        
-        // ★ FIX: salva também no Drive via /api/courses/add (para persistir entre sessões/logouts)
-        try{
-          const r=await fetch('/api/courses/add',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({coursePath,courseName,pdfCount:pdfCount||0,addedAt:Date.now()})
-          });
-          if(r.ok){
-            const d=await r.json().catch(()=>({}));
-            
-          }else{
-            console.warn('[AddCourse] /api/courses/add HTTP',r.status,'— continuando mesmo assim');
-          }
-        }catch(e){
-          console.warn('[AddCourse] falha ao salvar no Drive (continuando):',e.message);
-        }
-
-        // ★ TEORIA #4: feedback visual (toast) ANTES de fechar modal
-        if(window.showToast)showToast('Curso "'+courseName+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
-
-        // ★ TEORIA #3: chama renderCursos ANTES de remover overlay (lista atualizada quando modal fecha)
-        try{
-          renderCursos(box);
-                  }catch(e){
-          console.warn('[AddCourse] erro ao re-renderizar:',e.message);
-        }
-
-        // ★ TEORIA #2: só fecha modal DEPOIS de salvar + re-renderizar (evita "fecha sem nada acontecer")
-        if(overlay&&overlay.parentNode){
-          overlay.remove();
-                  }
-
-        // ★ BATALHÃO: dispara processamento em background (depois que modal já fechou)
-        // Não precisa extrair PDFs no front — o batalhão no worker escaneia tudo via gdiListAllFiles
-                try{
-          // apenas dispara o batalhão — não espera ( é async em background)
-          if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
-            // payload mínimo: o worker vai escanear o coursePath e descobrir PDFs sozinho
-            window.gdiIsaPdf.startBattalion(coursePath, coursePath, courseName, []).catch(e=>{
-              console.warn('[Batalhão] falha assíncrona (não bloqueante):',e.message);
-            });
-                      }else{
-            console.warn('[AddCourse] gdiIsaPdf.startBattalion não disponível — batalhão não disparado');
-          }
-        }catch(e){console.warn('[Batalhão] falha:',e.message);}
-      }catch(e){
-        console.error('[AddCourse] erro fatal em doAddCourseFromDrive:',e);
-        if(window.showToast)showToast('Erro ao adicionar curso: '+e.message);
-        throw e;
-      }
-    }
-
-    // ── Painel Manual (ícones + cores) ──
     overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(b=>{
       b.onclick=()=>{
         overlay.querySelectorAll('.gdi-amc-icon-btn').forEach(x=>x.style.borderColor='var(--ferreto-border,#30363d)');
@@ -2219,157 +1441,35 @@
         selectedColor=b.dataset.color;
       };
     });
+    // default selection
     const firstIcon=overlay.querySelector('.gdi-amc-icon-btn');
     if(firstIcon)firstIcon.style.borderColor='var(--ferreto-primary,#ff8b9f)';
     const firstColor=overlay.querySelector('.gdi-amc-color-btn');
     if(firstColor)firstColor.style.borderWidth='4px';
-
-    // ── Close handlers ──
-    const close=()=>{if(overlay&&overlay.parentNode)overlay.remove();};
+    const close=()=>overlay.remove();
     overlay.querySelector('#gdi-amc-x').onclick=close;
     overlay.querySelector('#gdi-amc-cancel').onclick=close;
     overlay.onclick=(e)=>{if(e.target===overlay)close();};
-
-    // ★ EVENT DELEGATION (CAPTURE): pega cliques no botão "Selecionar esta pasta"
-    // Não importa quantas vezes o botão for recriado por navigate() — esse handler
-    // sempre dispara porque está no overlay (parent estável). Use capture:true para
-    // pegar o evento ANTES de qualquer outro handler (garante execução).
-    // ★ FUNÇÃO GLOBAL também definida para inline onclick (fallback robusto)
-    window.__gdiAddCourseFromButton=async function(btn){
-      if(!btn){console.error('[AddCourse] botão null');return;}
-      const p=btn.dataset.path||'';
-      const n=btn.dataset.name||'Pasta';
-      const pdfs=parseInt(btn.dataset.pdfs||'0',10);
-      
-      // ★ 1) feedback visual imediato: spinner no botão + disable
-      const originalText=btn.textContent;
-      btn.disabled=true;
-      btn.style.opacity='0.6';
-      btn.style.pointerEvents='none';
-      btn.innerHTML='<i class="bi bi-hourglass-split"></i> Adicionando...';
-      try{
-        // ★ 2) chama persistência (async) — espera completar
-        await doAddCourseFromDrive(p, n, pdfs);
-        // ★ 3) modal já foi fechado dentro de doAddCourseFromDrive (após salvar + re-renderizar)
-      }catch(err){
-        console.error('[AddCourse] ERRO ao adicionar curso (inline):',err);
-        if(window.showToast)showToast('Erro: '+err.message);
-        // restaura botão em caso de erro
-        btn.disabled=false;
-        btn.style.opacity='1';
-        btn.style.pointerEvents='auto';
-        btn.textContent=originalText;
-      }
+    overlay.querySelector('#gdi-amc-save').onclick=async ()=>{
+      const name=overlay.querySelector('#gdi-amc-name').value.trim();
+      if(!name){showToast('Digite o nome do curso');return;}
+      const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
+      const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
+      // salvar curso manual
+      const LS_MANUAL='gdi-manual-courses-v1';
+      const manual=lsGet(LS_MANUAL,[]);
+      manual.push({
+        id:'mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
+        name,icon:selectedIcon,color:selectedColor,
+        goal,notes,createdAt:Date.now(),
+        manual:true
+      });
+      lsSet(LS_MANUAL,manual);
+      close();
+      showToast('Curso "'+name+'" adicionado!');
+      renderCursos(box);
     };
-
-    overlay.addEventListener('click',async(e)=>{
-      const btn=e.target.closest&&e.target.closest('#gdi-amc-select-current');
-      if(!btn)return;  // não foi clique no botão → ignora
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();  // ★ impede overlay.onclick de também disparar
-      // delega para função global (lida com spinner + async + try/catch)
-      if(window.__gdiAddCourseFromButton)window.__gdiAddCourseFromButton(btn);
-    },true);  // ← capture:true = pega no início do evento
-
-    // ── Save handler (decide modo) ──
-    saveBtn.onclick=async (e)=>{
-      if(e){e.preventDefault();e.stopPropagation();}
-      
-      try{
-        if(currentMode==='drive'){
-          if(!selectedPath||!selectedName){
-            console.warn('[AddCourse] nenhum path selecionado');
-            showToast('Navegue até uma pasta e clique em "Selecionar esta pasta"');
-            return;
-          }
-                    await doAddCourseFromDrive(selectedPath, selectedName, 0);
-        }else{
-          // modo manual
-          const name=overlay.querySelector('#gdi-amc-name').value.trim();
-          if(!name){showToast('Digite o nome do curso');return;}
-          const goal=parseInt(overlay.querySelector('#gdi-amc-goal').value)||60;
-          const notes=overlay.querySelector('#gdi-amc-notes').value.trim();
-          const LS_MANUAL='gdi-manual-courses-v1';
-          const manual=lsGet(LS_MANUAL,[]);
-          const courseId='mc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
-          const coursePath='/0:/'+encodeURIComponent(name);
-          manual.push({
-            id:courseId,name,icon:selectedIcon,color:selectedColor,
-            goal,notes,createdAt:Date.now(),
-            manual:true,path:coursePath,courseKey:coursePath
-          });
-          lsSet(LS_MANUAL,manual);
-          if(overlay&&overlay.parentNode)overlay.remove();
-          showToast('Curso "'+name+'" adicionado! 🐩 Batalhão de IA iniciando em background...');
-          try{renderCursos(box);}catch(_){}
-          // ★ BATALHÃO para manual
-          try{
-            const pdfs=[];
-            if(window.gdiListAllFiles){
-              try{
-                const files=await window.gdiListAllFiles(coursePath,'');
-                if(Array.isArray(files)){
-                  for(const f of files){
-                    if(f && f.mimeType && (f.mimeType.includes('pdf')||f.name&&f.name.toLowerCase().endsWith('.pdf'))){
-                      pdfs.push({name:f.name, url:f.path||f.url, text:''});
-                    }
-                  }
-                }
-              }catch(_){}
-            }
-            if(window.gdiIsaPdf && window.gdiIsaPdf.startBattalion){
-              if(pdfs.length && window.gdiIsaPdf.extractPdfText){
-              const PARALLEL=5;
-              for(let i=0;i<pdfs.length;i+=PARALLEL){
-                const chunk=pdfs.slice(i,i+PARALLEL);
-                await Promise.allSettled(chunk.map(async p=>{
-                  try{
-                    if(p.url){
-                      const txt=await window.gdiIsaPdf.extractPdfText(p.url);
-                      p.text=txt.slice(0,15000);
-                    }
-                  }catch(_){}
-                }));
-              }
-            }
-            await window.gdiIsaPdf.startBattalion(coursePath, coursePath, name, pdfs);
-          }
-        }catch(e){console.warn('[Batalhão] falha:',e.message);}
-        }
-      }catch(e){
-        console.error('[AddCourse] erro fatal no save handler:',e);
-        if(window.showToast)showToast('Erro: '+e.message);
-      }
-    };
-
-    // ── Inicia navegação na raiz ──
-    // Mostra lista de drives disponíveis (0:, 1:, etc) como folders
-    setTimeout(()=>{
-      // se currentPath é '/', mostra os drives como folders
-      if(window.drive_names && window.drive_names.length){
-        // monta uma pasta virtual para cada drive
-        bcEl.innerHTML=`<span class="gdi-amc-bc-item" data-p="/" style="cursor:pointer;color:var(--ferreto-secondary,#5ddeda);"><i class="bi bi-house"></i> Home</span>`;
-        foldersEl.innerHTML='';
-        loadingEl.style.display='none';
-        window.drive_names.forEach((dn,i)=>{
-          const card=document.createElement('div');
-          card.className='gdi-amc-folder-card';
-          card.dataset.p='/'+i+':';
-          card.dataset.n=dn;
-          card.style.cssText='padding:12px 14px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#30363d);border-radius:10px;cursor:pointer;transition:all .15s;';
-          card.innerHTML=`<div style="display:flex;align-items:center;gap:8px;"><i class="bi bi-hdd-stack-fill" style="color:var(--ferreto-primary,#ff8b9f);font-size:18px;flex:none;"></i><b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;">${esc(dn)}</b><i class="bi bi-chevron-right" style="color:var(--ferreto-text-faint,#6b7488);font-size:12px;flex:none;margin-left:auto;"></i></div>`;
-          card.onmouseenter=()=>{card.style.borderColor='var(--ferreto-primary,#ff8b9f)';card.style.background='var(--ferreto-surface-3,rgba(255,255,255,.08))';};
-          card.onmouseleave=()=>{card.style.borderColor='var(--ferreto-border,#30363d)';card.style.background='var(--ferreto-surface-2,rgba(255,255,255,.04))';};
-          card.onclick=()=>navigate('/'+i+':/');  // ★ FIX: passa path normalizado /0:/ (com slash)
-          foldersEl.appendChild(card);
-        });
-        currentInfoEl.style.display='none';
-      }else{
-        // fallback: tenta navegar direto de /0:/
-        navigate('/0:/');
-      }
-    },50);
+    setTimeout(()=>overlay.querySelector('#gdi-amc-name').focus(),50);
   }
 
   // ★ Modal de cursos ocultos
@@ -2785,123 +1885,24 @@
   }
   if(!document.getElementById('gdi-central-style')){
     const s=document.createElement('style');s.id='gdi-central-style';s.textContent=`
-/* ═══ CENTRAL DE ESTUDOS v3 — design moderno (sidebar + dashboard) ═══ */
-#gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);color:var(--ferreto-text,#f3f5fa);font-family:var(--ferreto-font-body,'Rubik',sans-serif);display:none;overflow-y:auto;}
-@keyframes gdi-central-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
-.gdi-central-box{width:100%;height:100%;min-height:100vh;margin:0;padding:0;background:var(--ferreto-bg,#070910);border:0;border-radius:0;}
-/* Header — minimalista, com stats rápidas */
-.gdi-central-head{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--ferreto-border,#21262d);background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.05));flex-shrink:0;flex-wrap:nowrap;}
-.gdi-central-head-title{display:flex;align-items:center;gap:10px;flex-shrink:0;}
-.gdi-central-head-title b{color:var(--ferreto-text,#f0f6fc);font-size:16px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-weight:600;}
-.gdi-central-head-title .gdi-central-icon{font-size:22px;}
-.gdi-central-stats{display:flex;gap:8px;flex:1;justify-content:center;flex-wrap:wrap;}
-.gdi-central-stat{display:flex;align-items:center;gap:6px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);border-radius:999px;padding:5px 12px;font-size:12px;color:var(--ferreto-text,#e6edf3);}
-.gdi-central-stat i{font-size:13px;}
-.gdi-central-stat b{color:var(--ferreto-text,#f0f6fc);font-weight:600;}
-.gdi-central-stat .gdi-stat-fire{color:#ff6b6b;}
-.gdi-central-stat .gdi-stat-time{color:#ffd43b;}
-.gdi-central-stat .gdi-stat-cards{color:var(--ferreto-primary,#ff8b9f);}
-#gdi-central-x{margin-left:auto;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text-muted,#8b949e);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
-#gdi-central-x:hover{background:rgba(255,107,107,.15);color:#ff8b8b;border-color:rgba(255,107,107,.3);}
-/* Layout principal: sidebar + body */
-.gdi-central-main{display:flex;flex:1;min-height:0;width:100%;}
-/* Sidebar */
-.gdi-central-sidebar{width:220px;flex-shrink:0;background:var(--ferreto-bg-2,#0d1119);border-right:1px solid var(--ferreto-border,#21262d);overflow-y:auto;padding:14px 10px;display:flex;flex-direction:column;gap:2px;}
-.gdi-central-sidebar::-webkit-scrollbar{width:6px;}
-.gdi-central-sidebar::-webkit-scrollbar-thumb{background:var(--ferreto-border,#21262d);border-radius:3px;}
-.gdi-central-sidebar-group{margin-top:14px;padding:0 8px;}
-.gdi-central-sidebar-group:first-child{margin-top:0;}
-.gdi-central-sidebar-label{font-size:10px;font-weight:700;color:var(--ferreto-text-faint,#6b7488);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;padding:0 8px;}
-.gdi-central-tab{display:flex;align-items:center;gap:10px;background:none;border:0;color:var(--ferreto-text-muted,#8b949e);padding:9px 12px;cursor:pointer;font-size:13px;border-radius:8px;transition:all .15s;font-family:var(--ferreto-font-body,'Rubik',sans-serif);width:100%;text-align:left;}
-.gdi-central-tab:hover{background:var(--ferreto-surface-2,rgba(255,255,255,.05));color:var(--ferreto-text,#f0f6fc);}
-.gdi-central-tab.active{background:linear-gradient(135deg,rgba(255,139,159,.18),rgba(93,222,218,.08));color:var(--ferreto-text,#f0f6fc);box-shadow:inset 0 0 0 1px rgba(255,139,159,.25);}
-.gdi-central-tab i{font-size:15px;width:18px;text-align:center;flex-shrink:0;}
-.gdi-central-tab.active i{color:var(--ferreto-primary,#ff8b9f);}
-.gdi-central-tab .gdi-tab-badge{margin-left:auto;background:var(--ferreto-primary,#ff8b9f);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;min-width:18px;text-align:center;}
-/* Body */
-.gdi-central-body{flex:1;overflow-y:auto;padding:24px;color:var(--ferreto-text,#f0f6fc);animation:gdi-tab-in .2s ease;}
-@keyframes gdi-tab-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.gdi-central-body::-webkit-scrollbar{width:8px;}
-.gdi-central-body::-webkit-scrollbar-thumb{background:var(--ferreto-border,#21262d);border-radius:4px;}
-.gdi-central-body::-webkit-scrollbar-thumb:hover{background:var(--ferreto-border-strong,#30363d);}
-/* Course cards — modernos */
-.gdi-courses{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
-.gdi-course{background:linear-gradient(135deg,var(--ferreto-surface-2,rgba(255,255,255,.04)),rgba(255,255,255,.02));border:1px solid var(--ferreto-border,#21262d);border-radius:16px;padding:18px;transition:all .2s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden;}
-.gdi-course::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--ferreto-grad);opacity:0;transition:opacity .2s;}
-.gdi-course:hover{border-color:rgba(255,139,159,.3);transform:translateY(-3px);box-shadow:0 12px 32px -8px rgba(0,0,0,.4);}
-.gdi-course:hover::before{opacity:1;}
-.gdi-course b{color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-weight:600;}
+/* ★ TELA CHEIA — Central de Estudos ocupa toda a viewport */
+#gdi-central{position:fixed;inset:0;z-index:10001;background:var(--ferreto-bg,#070910);display:none;align-items:stretch;justify-content:stretch;padding:0;}
+.gdi-central-box{background:var(--ferreto-bg,#0f1218);border:0;border-radius:0;width:100%;max-width:none;max-height:100dvh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
+.gdi-central-head{display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid var(--ferreto-border,#21262d);flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,139,159,.1),rgba(93,222,218,.06));flex-shrink:0;}
+.gdi-central-tabs{display:flex;gap:4px;padding:8px 24px 0;border-bottom:1px solid var(--ferreto-border,#21262d);flex-wrap:wrap;flex-shrink:0;overflow-x:auto;}
+.gdi-central-tab{background:none;border:0;color:var(--ferreto-text-muted,#8b949e);padding:10px 16px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;font-family:var(--ferreto-font-body,'Rubik',sans-serif);white-space:nowrap;}
+.gdi-central-tab:hover{color:var(--ferreto-text,#f0f6fc);}
+.gdi-central-tab.active{color:var(--ferreto-text,#f0f6fc);border-bottom-color:var(--ferreto-primary,#ff8b9f);}
+.gdi-central-body{flex:1;overflow-y:auto;padding:24px;color:var(--ferreto-text,#f0f6fc);}
+.gdi-courses{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
+.gdi-course{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:16px;transition:border-color .15s,transform .15s;}
+.gdi-course:hover{border-color:var(--ferreto-border-strong,#30363d);transform:translateY(-2px);}
+.gdi-course b{color:var(--ferreto-text,#f0f6fc);font-size:14px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--ferreto-font-display,'Poppins',sans-serif);}
 .gdi-course small{color:var(--ferreto-text-muted,#8b949e);font-size:11px;display:block;margin:6px 0 12px;}
-/* Stats grid no card de curso */
-.gdi-course-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0;}
-.gdi-course-stat{background:var(--ferreto-surface-3,rgba(255,255,255,.04));border-radius:8px;padding:8px 6px;text-align:center;}
-.gdi-course-stat-num{font-size:18px;font-weight:700;color:var(--ferreto-text,#f0f6fc);display:block;font-family:var(--ferreto-font-display,'Poppins',sans-serif);}
-.gdi-course-stat-label{font-size:9px;color:var(--ferreto-text-muted,#8b949e);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;display:block;}
-/* Progress bar */
-.gdi-progress-bar{height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;margin:10px 0;}
-.gdi-progress-fill{height:100%;background:var(--ferreto-grad);border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1);}
-/* Botão Continuar — CTA principal */
-.gdi-btn-continue{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:10px;background:var(--ferreto-grad);color:#fff;border:0;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--ferreto-font-body,'Rubik',sans-serif);transition:all .15s;}
-.gdi-btn-continue:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 6px 18px -4px var(--ferreto-glow);}
-.gdi-btn-continue:disabled{opacity:.5;cursor:default;filter:none;transform:none;box-shadow:none;}
-.gdi-btn-continue.gdi-btn-done{background:rgba(63,185,80,.15);color:#3fb950;border:1px solid rgba(63,185,80,.3);}
-/* Empty state melhorado */
-.gdi-empty-state{padding:60px 20px;text-align:center;}
-.gdi-empty-state-icon{font-size:64px;line-height:1;margin-bottom:16px;opacity:.5;display:block;}
-.gdi-empty-state h3{color:var(--ferreto-text,#f0f6fc);font-size:18px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);margin:0 0 8px;font-weight:600;}
-.gdi-empty-state p{color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0 0 20px;line-height:1.6;max-width:400px;margin-left:auto;margin-right:auto;}
-/* Dashboard hero (Início) */
-.gdi-dashboard-hero{background:linear-gradient(135deg,rgba(255,139,159,.12),rgba(93,222,218,.08));border:1px solid var(--ferreto-border,#21262d);border-radius:18px;padding:24px;margin-bottom:20px;position:relative;overflow:hidden;}
-.gdi-dashboard-hero::after{content:'';position:absolute;top:-50%;right:-20%;width:60%;height:200%;background:radial-gradient(ellipse,rgba(255,139,159,.08),transparent 70%);pointer-events:none;}
-.gdi-dashboard-hero h2{color:var(--ferreto-text,#f0f6fc);font-size:22px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);margin:0 0 6px;font-weight:700;}
-.gdi-dashboard-hero p{color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0;}
-.gdi-dashboard-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px;}
-.gdi-dashboard-card{background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:16px;cursor:pointer;transition:all .2s;}
-.gdi-dashboard-card:hover{border-color:rgba(255,139,159,.3);transform:translateY(-2px);}
-.gdi-dashboard-card-icon{font-size:28px;display:block;margin-bottom:8px;}
-.gdi-dashboard-card-num{font-size:24px;font-weight:700;color:var(--ferreto-text,#f0f6fc);font-family:var(--ferreto-font-display,'Poppins',sans-serif);display:block;}
-.gdi-dashboard-card-label{font-size:11px;color:var(--ferreto-text-muted,#8b949e);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;display:block;}
-.gdi-dashboard-card-meta{font-size:11px;color:var(--ferreto-text-faint,#6b7488);margin-top:6px;display:block;}
-/* Quick actions */
-.gdi-quick-actions{display:flex;gap:8px;flex-wrap:wrap;}
-.gdi-quick-action{display:flex;align-items:center;gap:6px;background:var(--ferreto-surface-2,rgba(255,255,255,.04));border:1px solid var(--ferreto-border,#21262d);color:var(--ferreto-text,#e6edf3);padding:10px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-family:var(--ferreto-font-body,'Rubik',sans-serif);transition:all .15s;}
-.gdi-quick-action:hover{background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-color:rgba(255,139,159,.3);transform:translateY(-1px);}
-.gdi-quick-action i{color:var(--ferreto-primary,#ff8b9f);}
-/* Heatmap - largura 100% conforme solicitado */
-.heat-wrap{width:100%;overflow-x:auto;padding-bottom:6px;}
-.heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,13px);grid-template-columns:repeat(auto-fill,minmax(13px,1fr));gap:3px;width:100%;min-width:100%;}
-.heat i{width:13px;height:13px;border-radius:3px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));display:block;transition:transform .15s;}
-.heat i:hover{transform:scale(1.4);}
+.heat{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,10px);gap:3px;width:max-content;}
+.heat i{width:10px;height:10px;border-radius:2px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));display:block;}
 .heat i.l1{background:#0e4429}.heat i.l2{background:#006d32}.heat i.l3{background:#26a641}.heat i.l4{background:#39d353}
-/* Fix dark-mode dropdowns illegíveis (Redação, etc.) */
-.gdi-central-box select, .gdi-central-box select option, .gdi-central-box optgroup {
-  color-scheme: dark light;
-  background: var(--ferreto-bg-2,#0d1119);
-  color: var(--ferreto-text,#e6edf3);
-}
-[data-bs-theme="light"] .gdi-central-box select,
-[data-bs-theme="light"] .gdi-central-box select option,
-[data-bs-theme="light"] .gdi-central-box optgroup {
-  color-scheme: light; background: #fff; color: #1f2540;
-}
-/* Z-index unificado para todos os modais */
-.gdi-modal-overlay{z-index:100000!important;}
 .gdi-fc{background:var(--ferreto-surface-2,rgba(255,255,255,.045));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:14px;padding:26px 20px;min-height:170px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;max-width:560px;margin:0 auto;}
-
-
-/* Responsive */
-@media(max-width:768px){
-  .gdi-central-sidebar{width:60px;padding:10px 6px;}
-  .gdi-central-sidebar-group{padding:0 4px;}
-  .gdi-central-sidebar-label{display:none;}
-  .gdi-central-tab{padding:9px 8px;justify-content:center;}
-  .gdi-central-tab span,.gdi-central-tab .gdi-tab-badge{display:none;}
-  .gdi-central-stats{display:none;}
-  .gdi-central-head{padding:12px 14px;gap:10px;}
-  .gdi-central-body{padding:16px;}
-  .gdi-courses{grid-template-columns:1fr;}
-  .gdi-course-stats{grid-template-columns:repeat(2,1fr);}
-}
 `;document.head.appendChild(s);
   }
   // ★ Central de Estudos agora é uma ABA na navbar (não mais flutuante).
@@ -2959,12 +1960,7 @@
     if(e.code==='Space'){e.preventDefault();FC.flip&&FC.flip();}
     else if(e.key==='1'||e.key==='2'||e.key==='3'){FC.grade&&FC.grade(+e.key);}
   });
-
-
-  log('central de estudos ativa (v2.6 — aba na navbar, sem observer loop)');
-
-  // PLANO A v2: Bootstrap robusto — Após login, redireciona para ?central=1
-// (bootstrap removido — Central abre via botão da navbar como antes)
+  log('central de estudos ativa (v2.6 \u2014 aba na navbar, sem observer loop)');
 })();
 
 // ═══════════════════════════════════════════════════════════════
@@ -3091,49 +2087,22 @@
     box.querySelector('#prova-back').onclick=()=>window.renderProvas(box);
   }
 
-  // ── Render: Correção de Redação (repaginada + bancas de Vestibular/ENEM) ──
+  // ── Render: Correção de Redação ──
   window.renderRedacao=function(box){
     const corrections=lsGet('gdi-essay-corrections-v1',[]);
-    // ★ Bancas de Concurso + ENEM + Vestibulares de Medicina
-    const BANCA_GROUPS=[
-      {label:'Concurso Público',bancas:['CEBRASPE (CESPE)','FGV','VUNESP','FCC','CESGRANRIO','IBFC','FUJB','OAB','TJ/SP','TRT','MPU','TRE','TCU','PF/PRF','Outra']},
-      {label:'ENEM',bancas:['ENEM (5 competências)']},
-      {label:'Vestibulares Medicina',bancas:['FUVEST (dissertativa)','UNICAMP','UNIFESP','USP','ENEM Med','UECE Med','UERJ Med','UNESP Med']},
-      {label:'Outros Vestibulares',bancas:['ITA','IME','UFRGS','UFPR','UFSC','UFRJ','PUC-SP','MACKENZIE']}
-    ];
-    // ★ Estilos de redação
-    const TIPOS=['Dissertativa-argumentativa','Estudo de caso','Discursiva','Narrativa','Carta argumentativa','Artigo opinativo'];
+    const BANCAS=['CEBRASPE (CESPE)','FGV','VUNESP','FCC','CESGRANRIO','IBFC','FUJB','OAB','TJ/SP','TRT','MPU','TRE','TCU','PF/PRF','Outra'];
     box.innerHTML=`
-      <div style="margin-bottom:20px;padding:20px;background:linear-gradient(135deg,rgba(255,139,159,.08),rgba(93,222,218,.04));border:1px solid var(--ferreto-border-strong,#30363d);border-radius:16px;">
-        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
-          <div style="font-size:34px;flex:none;">✍️</div>
-          <div style="flex:1;">
-            <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:18px;">Correção de Redação</h3>
-            <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0;line-height:1.5;">A Meggy corrige seguindo os critérios oficiais da banca. Envie o texto digitado ou uma imagem escaneada — a correção é salva em Markdown na pasta do aluno no Drive.</p>
-          </div>
+      <div style="margin-bottom:18px;">
+        <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 8px;">✍️ Correção de Redação</h3>
+        <p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0 0 14px;">A Meggy corrige sua redação seguindo os critérios oficiais da banca escolhida.</p>
+        <div style="margin-bottom:12px;">
+          <label style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);display:block;margin-bottom:4px;">Banca:</label>
+          <select id="red-banca" style="${inp}width:auto;">
+            ${BANCAS.map(b=>`<option value="${b}">${b}</option>`).join('')}
+          </select>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-          <div>
-            <label style="font-size:11px;color:var(--ferreto-text-muted,#8b949e);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Banca organizadora</label>
-            <select id="red-banca" class="gdi-redacao-select" style="${inp}width:100%;color-scheme:dark;">
-              ${BANCA_GROUPS.map(g=>`<optgroup label="${esc(g.label)}">${g.bancas.map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('')}</optgroup>`).join('')}
-            </select>
-          </div>
-          <div>
-            <label style="font-size:11px;color:var(--ferreto-text-muted,#8b949e);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Tipo de redação</label>
-            <select id="red-tipo" class="gdi-redacao-select" style="${inp}width:100%;color-scheme:dark;">
-              ${TIPOS.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <div id="red-dropzone" style="border:2px dashed var(--ferreto-border-strong,#30363d);border-radius:12px;padding:18px;text-align:center;cursor:pointer;transition:all .2s;background:var(--ferreto-surface-2,rgba(255,255,255,.03));margin-bottom:12px;">
-          <i class="bi bi-cloud-arrow-up" style="font-size:28px;color:var(--ferreto-text-muted,#8b949e);"></i>
-          <div style="color:var(--ferreto-text,#f0f6fc);font-size:13px;margin-top:6px;">Arraste uma imagem da redação escaneada ou <b style="color:var(--ferreto-primary,#ff8b9f);">clique para enviar</b></div>
-          <div style="color:var(--ferreto-text-faint,#6b7488);font-size:11px;margin-top:4px;">JPG, PNG ou PDF · A Meggy faz OCR do conteúdo</div>
-          <input type="file" id="red-file" accept="image/*,application/pdf" style="display:none;">
-        </div>
-        <textarea id="red-text" placeholder="Cole aqui sua redação (mínimo 50 caracteres)..." style="${inp}min-height:240px;resize:vertical;font-family:Georgia,serif;font-size:14px;line-height:1.6;width:100%;box-sizing:border-box;"></textarea>
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <textarea id="red-text" placeholder="Cole sua redação aqui..." style="${inp}min-height:200px;resize:vertical;font-family:Georgia,serif;font-size:14px;line-height:1.6;"></textarea>
+        <div style="margin-top:10px;display:flex;gap:8px;">
           <button class="gdi-btn gdi-btn-primary" id="red-corrigir"><i class="bi bi-pencil-square"></i> Corrigir com Meggy</button>
           <span id="red-status" style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;align-self:center;"></span>
         </div>
@@ -3141,51 +2110,15 @@
       <div id="red-result"></div>
       ${corrections.length?`<h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:18px 0 8px;">Correções anteriores (${corrections.length})</h4>
       <div style="display:flex;flex-direction:column;gap:6px;">${corrections.slice().reverse().slice(0,10).map(c=>`<div class="gdi-note" style="cursor:pointer;" data-id="${c.id}">
-        <span style="flex:1;"><b style="color:var(--ferreto-text,#f0f6fc);">${esc(c.banca)}</b> · <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${new Date(c.date).toLocaleDateString('pt-BR')} · Nota: ${c.score||'—'}${c.tipo? ' · '+esc(c.tipo):''}</span></span>
+        <span style="flex:1;"><b style="color:var(--ferreto-text,#f0f6fc);">${esc(c.banca)}</b> · <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${new Date(c.date).toLocaleDateString('pt-BR')} · Nota: ${c.score||'—'}</span></span>
       </div>`).join('')}</div>`:''}
     `;
-    // ★ Drag&drop da imagem escaneada
-    const dz=box.querySelector('#red-dropzone');
-    const fileInput=box.querySelector('#red-file');
-    const statusDrop=box.querySelector('#red-status');  // ★ FIX: status estava fora de escopo
-    if(dz&&fileInput){
-      dz.onclick=()=>fileInput.click();
-      fileInput.onchange=async e=>{
-        const f=e.target.files[0];
-        if(!f)return;
-        // OCR via Tesseract.js (lazy load) ou envio direto ao worker
-        if(statusDrop)statusDrop.innerHTML='<i class="bi bi-hourglass-split"></i> Lendo imagem da redação…';
-        try{
-          if(f.type.startsWith('image/')){
-            // envia imagem direto ao worker /api/ai/redacao (que fará OCR/vision)
-            const fd=new FormData();
-            fd.append('file',f);
-            fd.append('mode','ocr');
-            const r=await fetch('/api/ai/redacao',{method:'POST',body:fd});
-            const data=await r.json();
-            if(data.ok&&data.text){
-              box.querySelector('#red-text').value=data.text;
-              if(statusDrop)statusDrop.innerHTML='<span style="color:#3fb950;"><i class="bi bi-check-circle"></i> Texto extraído da imagem ('+data.text.length+' chars). Revise antes de corrigir.</span>';
-            }else if(statusDrop){statusDrop.innerHTML='<span style="color:#ff6b6b;">Falha OCR: '+(data.error||'desconhecido')+'</span>';}
-          }else if(f.type==='application/pdf'){
-            // PDF → usa pdf.js (igual ao M9-ISA)
-            if(window.gdiIsaPdf&&window.gdiIsaPdf.extractPdfText){
-              const url=URL.createObjectURL(f);
-              const txt=await window.gdiIsaPdf.extractPdfText(url);
-              box.querySelector('#red-text').value=txt;
-              if(statusDrop)statusDrop.innerHTML='<span style="color:#3fb950;"><i class="bi bi-check-circle"></i> Texto extraído do PDF ('+txt.length+' chars).</span>';
-            }else if(statusDrop){statusDrop.innerHTML='<span style="color:#ff6b6b;">Carregue o módulo de PDFs primeiro.</span>';}
-          }
-        }catch(err){if(statusDrop)statusDrop.innerHTML='<span style="color:#ff6b6b;">Erro: '+esc(err.message)+'</span>';}
-      };
-    }
     box.querySelector('#red-corrigir').onclick=async()=>{
       const banca=box.querySelector('#red-banca').value;
-      const tipo=box.querySelector('#red-tipo').value;
       const text=box.querySelector('#red-text').value.trim();
       const status=box.querySelector('#red-status');
       const result=box.querySelector('#red-result');
-      if(!text||text.length<50){showToast('Escreva ou cole sua redação primeiro (mínimo 50 caracteres)');return;}
+      if(!text||text.length<50){showToast('Escreva ou cole sua redação primeiro');return;}
       status.innerHTML='<i class="bi bi-hourglass-split"></i> Meggy está corrigindo…';
       result.innerHTML='';
       try{
@@ -3204,48 +2137,22 @@
           'TRE':'TRE (CEBRASPE): escala 0-10. Mesmos critérios CEBRASPE.',
           'TCU':'TCU (CEBRASPE): escala 0-10. Mesmos critérios CEBRASPE.',
           'PF/PRF':'PF/PRF (CEBRASPE): escala 0-10. Mesmos critérios CEBRASPE.',
-          'ENEM (5 competências)':'ENEM usa 5 competências (0-200 cada, total 0-1000): C1 Domínio norma culta, C2 Compreensão proposta, C3 Seleção/relação/organização argumentos, C4 Coesão, C5 Proposta de intervenção. Cada erro exclui 50 pontos por competência.',
-          'FUVEST (dissertativa)':'FUVEST dissertativa escala 0-100. Critérios: conteúdo (0-50), estrutura (0-30), linguagem (0-20).',
-          'UNICAMP':'UNICAMP avalia: tema e desenvolvimento, coesão e coerência, gramática e léxico, atendimento à proposta. Escala 0-100.',
-          'UNIFESP':'UNIFESP dissertativa escala 0-100. Conteúdo, estrutura, linguagem.',
-          'USP':'USP dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
-          'ENEM Med':'ENEM + peso 5x para medicina. Critérios ENEM mas com exigência máxima.',
-          'UECE Med':'UECE dissertativa escala 0-10. Conteúdo, estrutura, linguagem.',
-          'UERJ Med':'UERJ dissertativa escala 0-100. Conteúdo, organização, linguagem.',
-          'UNESP Med':'UNESP dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
-          'ITA':'ITA dissertativa escala 0-100. Conteúdo técnico-científico, estrutura, expressão.',
-          'IME':'IME dissertativa técnica. Conteúdo, estrutura, expressão. Escala 0-100.',
-          'UFRGS':'UFRGS dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
-          'UFPR':'UFPR dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
-          'UFSC':'UFSC dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
-          'UFRJ':'UFRJ dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
-          'PUC-SP':'PUC-SP dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
-          'MACKENZIE':'MACKENZIE dissertativa escala 0-100. Conteúdo, estrutura, expressão.',
           'Outra':'Critérios gerais de concurso público brasileiro.'
         };
         const criterios=bancaInfo[banca]||bancaInfo['Outra'];
-        const prompt='Você é um corretor de redações experiente. Corrija esta redação de banca: '+banca+' ('+tipo+').\n\nCRITÉRIOS DESTA BANCA: '+criterios+'\n\nINSTRUÇÕES:\n1. Avalie cada critério da banca com nota parcial (0-10 ou 0-200 conforme ENEM).\n2. Dê uma NOTA GERAL final.\n3. Para cada parágrafo, identifique: (a) problemas de conteúdo, (b) problemas gramaticais com a regra violada, (c) problemas de estrutura/coesão.\n4. Cite o trecho exato do aluno, depois comente.\n5. Dê sugestões concretas de reescrita.\n6. Identifique o tipo de redação automaticamente se foi marcado errado.\n7. Comente sobre adequação ao tema, argumentação, coesão, coerência, norma culta.\n\nFORMATO Markdown com seções ## :\n- ## Nota Geral: X/10\n- ## Avaliação por Critério\n- ## Comentários por Parágrafo (com citação)\n- ## Pontos Fortes\n- ## Pontos Fracos\n- ## Sugestões de Melhoria\n- ## Versão Reescrita\n\nREDAÇÃO DO ALUNO ('+text.length+' caracteres, banca '+banca+', tipo declarado: '+tipo+'):\n\n'+text;
-        const resp=await callMeggy(prompt);
-        const scoreMatch=resp.match(/nota\s*geral\s*:?\s*(\d+[,.]?\d*)\s*(?:\/\s*(\d+))?/i)||resp.match(/nota\s*:?\s*(\d+[,.]?\d*)/i);
+        const resp=await callMeggy('Corrija esta redação de concurso público (banca: '+banca+'). CRITÉRIOS DESTA BANCA: '+criterios+'. Avalie cada critério com nota de 0 a 10 + nota geral + comentários detalhados ponto por ponto + sugestões de melhoria + versão reescrita de trechos problemáticos. Formato Markdown com ## seções:\n\nREDAÇÃO:\n'+text);
+        // extrai nota geral (procura "Nota geral:" ou "Nota: X")
+        const scoreMatch=resp.match(/nota\s*geral\s*:?\s*(\d+[,.]?\d*)/i)||resp.match(/nota\s*:?\s*(\d+[,.]?\d*)/i);
         const score=scoreMatch?scoreMatch[1]:'—';
-        const correction={id:uid(),banca,tipo,date:Date.now(),text:text.slice(0,4000),correction:resp,score};
+        const correction={id:uid(),banca,date:Date.now(),text:text.slice(0,2000),correction:resp,score};
         const corr=lsGet('gdi-essay-corrections-v1',[]);
         corr.push(correction);
         lsSet('gdi-essay-corrections-v1',corr);
-        // ★ Salva versão MD da prova com correção no Drive do aluno
-        try{
-          const md='---\n'+'banca: "'+banca+'"\n'+'tipo: "'+tipo+'"\n'+'data: '+new Date().toISOString()+'\n'+'score: '+score+'\n'+'---\n\n# Redação Corrigida\n\n## Redação Original\n\n'+text+'\n\n## Correção da Meggy\n\n'+resp+'\n';
-          if(window.gdiIsaPdf&&window.gdiIsaPdf.saveEssayMD){
-            await window.gdiIsaPdf.saveEssayMD(md,banca,tipo,score);
-            showToast('Redação corrigida! Nota: '+score+' · MD salvo no Drive');
-          }else{
-            showToast('Redação corrigida! Nota: '+score);
-          }
-        }catch(_){showToast('Redação corrigida! Nota: '+score);}
         status.innerHTML='';
         result.innerHTML=`<div class="gdi-isa-summary-body" style="background:var(--ferreto-surface-2,rgba(255,255,255,.03));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:20px;color:var(--ferreto-text,#e6edf3);font-size:14px;line-height:1.8;margin-top:14px;">
           ${renderMd(resp)}
         </div>`;
+        showToast('Redação corrigida! Nota: '+score);
       }catch(e){
         status.innerHTML='<span style="color:#ff6b6b;">Erro: '+esc(e.message)+'</span>';
       }
@@ -3255,7 +2162,6 @@
         const c=corrections.find(x=>x.id===el.dataset.id);
         if(c){
           box.querySelector('#red-banca').value=c.banca;
-          if(c.tipo&&box.querySelector('#red-tipo'))box.querySelector('#red-tipo').value=c.tipo;
           box.querySelector('#red-text').value=c.text;
           box.querySelector('#red-result').innerHTML=`<div class="gdi-isa-summary-body" style="background:var(--ferreto-surface-2,rgba(255,255,255,.03));border:1px solid var(--ferreto-border,#21262d);border-radius:14px;padding:20px;color:var(--ferreto-text,#e6edf3);font-size:14px;line-height:1.8;margin-top:14px;">${renderMd(c.correction)}</div>`;
         }
@@ -3263,7 +2169,7 @@
     });
   };
 
-  // ── Render: Mapa de Fracos (tiles retangulares ligados a Meus Cursos) ──
+  // ── Render: Radar de fracos (SVG) ──
   window.renderRadar=function(box){
     // coleta dados de questões por assunto
     const qs=lsGet('gdi-questions-v1',[]);
@@ -3271,92 +2177,68 @@
     const bySubject={};
     qs.forEach(q=>{
       const s=q.subject||'Geral';
-      if(!bySubject[s])bySubject[s]={total:0,correct:0,wrong:0,paths:new Set()};
+      if(!bySubject[s])bySubject[s]={total:0,correct:0,wrong:0};
       bySubject[s].total++;
-      if(q.path)bySubject[s].paths.add(q.path);
       const st=srs[q.id];
       if(st){
         if(st.box>0)bySubject[s].correct++;
         else bySubject[s].wrong++;
       }
     });
-    // enriquece com aulas menos estudadas do cronograma
-    const cron=lsGet('gdi-cronograma-v1',null);
-    const aulasMenosEstudadas=[];
-    if(cron&&Array.isArray(cron.plan)){
-      cron.plan.forEach(t=>{if(t&&t.name&&t.type==='study')aulasMenosEstudadas.push(t.name);});
-    }
-    // trilhas criadas pelo aluno
-    const trails=window.gdiTrails?window.gdiTrails.get():[];
-    // cursos do aluno (Meus Cursos)
-    const courses=collectCourses();
-    const subjects=Object.entries(bySubject).filter(([,v])=>v.total>=1).sort((a,b)=>b[1].total-a[1].total);
+    const subjects=Object.entries(bySubject).filter(([,v])=>v.total>=1).sort((a,b)=>b[1].total-a[1].total).slice(0,8);
     if(!subjects.length){
-      box.innerHTML=`<div class="gdi-notes-empty" style="padding:60px 20px;text-align:center;">
-        <i class="bi bi-bullseye" style="font-size:48px;display:block;margin-bottom:12px;color:var(--ferreto-text-faint,#6b7488);"></i>
-        Resolva algumas questões para ver seu mapa de fracos.<br>
-        <span style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Gere questões em Meus Cursos → Resumos / Questões / Pílulas.</span>
-      </div>`;
+      box.innerHTML='<div class="gdi-notes-empty">Resolva algumas questões para ver seu mapa de fracos.</div>';
       return;
     }
-    const weakSubjects=subjects.filter(([,v])=>v.total>0&&(v.correct/v.total)<0.6).sort((a,b)=>(a[1].correct/a[1].total)-(b[1].correct/b[1].total));
-    // tiles retangulares
-    const tileColor=acc=>acc<0.4?'#ff6b6b':acc<0.6?'#ffd43b':acc<0.8?'#3fb950':'#1a7f37';
-    const tiles=subjects.map(([s,v])=>{
+    // SVG radar
+    const size=300,cx=150,cy=150,maxR=110;
+    const n=subjects.length;
+    const angle=i=>(-Math.PI/2)+(i*2*Math.PI/n);
+    const pt=(r,i)=>[cx+r*Math.cos(angle(i)),cy+r*Math.sin(angle(i))];
+    // grid (5 anéis)
+    let grid='';
+    for(let r=1;r<=5;r++){
+      const rr=maxR*r/5;
+      const pts=Array.from({length:n},(_,i)=>pt(rr,i).join(',')).join(' ');
+      grid+=`<polygon points="${pts}" fill="none" stroke="var(--ferreto-border,#30363d)" stroke-width="1" opacity="${0.3+r*0.1}"/>`;
+    }
+    // eixos
+    let axes='';
+    subjects.forEach(([,],i)=>{const [x,y]=pt(maxR,i);axes+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--ferreto-border,#30363d)" stroke-width="1" opacity=".3"/>`;});
+    // dados
+    let dataPts='';
+    let labels='';
+    subjects.forEach(([subj,v],i)=>{
       const acc=v.total>0?(v.correct/v.total):0;
-      const pct=Math.round(acc*100);
-      const c=tileColor(acc);
-      // ★ FIX: co estava fora do escopo do find() — agora referenciado corretamente
-      let linkedKey=null;
-      for(const co of courses){const seg=co.key.split('/');if(seg.length>1&&s.includes(seg[seg.length-1])){linkedKey=co.key;break;}}
-      return `<div class="gdi-course" data-subject="${esc(s)}" ${linkedKey?`data-course-key="${esc(linkedKey)}"`:''} style="cursor:pointer;display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-left:4px solid ${c};">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s)}</b>
-          <span style="font-size:18px;font-weight:700;color:${c};font-variant-numeric:tabular-nums;">${pct}%</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${v.correct} acertos · ${v.wrong} erros · ${v.total} total</span>
-          ${linkedKey?'<span style="color:var(--ferreto-primary,#ff8b9f);font-size:10px;"><i class="bi bi-link-45deg"></i> Meus Cursos</span>':''}
-        </div>
-        <div style="height:6px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));border-radius:3px;overflow:hidden;">
-          <div style="height:100%;width:${pct}%;background:${c};border-radius:3px;transition:width .3s;"></div>
-        </div>
-      </div>`;
-    }).join('');
-    box.innerHTML=`<div>
-      <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);">🎯 Mapa de Fracos</h3>
-      <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0 0 16px;line-height:1.5;">Clique em um tile para abrir as questões daquela matéria. Foque nas áreas em <b style="color:#ff6b6b;">vermelho</b> (acerto < 40%) e <b style="color:#ffd43b;">amarelo</b> (40-60%).</p>
-      ${weakSubjects.length?`<div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);border-radius:12px;padding:14px 16px;margin-bottom:16px;">
-        <b style="color:#ff8b8b;font-size:13px;"><i class="bi bi-exclamation-triangle-fill"></i> Foque em:</b>
-        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
-          ${weakSubjects.map(([s,v])=>`<span style="color:var(--ferreto-text,#e6edf3);font-size:13px;">• <b>${esc(s)}</b> — ${Math.round(v.correct/v.total*100)}% de acerto (${v.correct}/${v.total})${v.paths.size?` · <span style=\"color:var(--ferreto-text-muted,#8b949e);font-size:11px;\">${v.paths.size} aula(s)</span>`:''}</span>`).join('')}
-        </div>
-      </div>`:'<div style="background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.3);border-radius:12px;padding:14px 16px;margin-bottom:16px;"><b style="color:#3fb950;"><i class="bi bi-check-circle-fill"></i> Bom desempenho geral!</b> Nenhuma matéria com taxa de acerto abaixo de 60%.</div>'}
-      ${aulasMenosEstudadas.length?`<div style="background:rgba(255,212,59,.08);border:1px solid rgba(255,212,59,.3);border-radius:12px;padding:14px 16px;margin-bottom:16px;">
-        <b style="color:#ffd43b;font-size:13px;"><i class="bi bi-book-half"></i> Aulas menos estudadas no cronograma:</b>
-        <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
-          ${aulasMenosEstudadas.slice(0,5).map(n=>`<span style="color:var(--ferreto-text,#e6edf3);font-size:12px;">• ${esc(n)}</span>`).join('')}
-        </div>
-      </div>`:''}
-      ${trails.length?`<div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-bottom:8px;"><i class="bi bi-signpost-2"></i> ${trails.length} trilha(s) criada(s) — vincule matérias fracas a uma trilha para estudar com foco.</div>`:''}
-      <div class="gdi-courses" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
-        ${tiles}
-      </div>
-    </div>`;
-    // clique no tile → abrir Questões filtradas
-    box.querySelectorAll('[data-subject]').forEach(el=>{
-      el.onclick=()=>{
-        // navega para Questões e aplica filtro de subject
-        const subj=el.dataset.subject;
-        const panel=document.getElementById('gdi-central');
-        if(panel){
-          const t=panel.querySelector('.gdi-central-tab[data-t=\"questoes\"]');
-          if(t)t.click();
-          // tenta aplicar filtro depois que Questões renderiza
-          setTimeout(()=>{try{_qFilterSubject=subj;const b=panel.querySelector('#gdi-q-subjects');if(b){const ev=new Event('click');}}catch(_){}},200);
-        }
-      };
+      const r=maxR*Math.max(0.1,1-acc); // quanto menor acerto, mais pra fora (pior)
+      const [x,y]=pt(r,i);
+      dataPts+=`${x},${y} `;
+      // label
+      const [lx,ly]=pt(maxR+22,i);
+      const short=subj.length>18?subj.slice(0,16)+'…':subj;
+      const color=acc<0.5?'#ff6b6b':acc<0.7?'#ffd43b':'#3fb950';
+      labels+=`<text x="${lx}" y="${ly}" text-anchor="middle" font-size="9" fill="${color}">${esc(short)}</text>`;
+      labels+=`<text x="${lx}" y="${ly+10}" text-anchor="middle" font-size="8" fill="var(--ferreto-text-muted,#8b949e)">${Math.round(acc*100)}%</text>`;
     });
+    const weakSubjects=subjects.filter(([,v])=>v.total>0&&(v.correct/v.total)<0.6).sort((a,b)=>(a[1].correct/a[1].total)-(b[1].correct/b[1].total));
+    box.innerHTML=`<div style="max-width:760px;">
+      <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;">🎯 Mapa de Fracos</h3>
+      <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0 0 16px;">Quanto mais pra fora, pior seu desempenho. Foque nas áreas vermelhas.</p>
+      <div style="display:flex;justify-content:center;margin-bottom:20px;">
+        <svg width="${size}" height="${size}" style="max-width:100%;">
+          ${grid}${axes}
+          <polygon points="${dataPts.trim()}" fill="rgba(255,139,159,.2)" stroke="var(--ferreto-primary,#ff8b9f)" stroke-width="2"/>
+          ${dataPts.trim().split(' ').map(p=>{const[x,y]=p.split(',');return `<circle cx="${x}" cy="${y}" r="3" fill="var(--ferreto-primary,#ff8b9f)"/>`;}).join('')}
+          ${labels}
+        </svg>
+      </div>
+      ${weakSubjects.length?`<div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);border-radius:12px;padding:14px;margin-bottom:14px;">
+        <b style="color:#ff8b8b;">⚠️ Foque em:</b>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+          ${weakSubjects.map(([s,v])=>`<span style="color:var(--ferreto-text,#e6edf3);font-size:13px;">• ${esc(s)} — ${Math.round(v.correct/v.total*100)}% de acerto (${v.correct}/${v.total})</span>`).join('')}
+        </div>
+      </div>`:'<div style="background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.3);border-radius:12px;padding:14px;"><b style="color:#3fb950;">✓ Bom desempenho geral!</b> Nenhuma matéria com taxa de acerto abaixo de 60%.</div>'}
+    </div>`;
   };
 
   console.log('[GDI Extras] M24 Estudo Avançado (provas/redação/radar) ativo');

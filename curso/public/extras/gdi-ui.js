@@ -37,61 +37,7 @@ body.gdi-fv .gdi-player-wrap #vplayer,
 body.gdi-fv .gdi-player-wrap #player-container,
 body.gdi-fv .gdi-player-wrap iframe{
   width:100%!important;max-width:100%!important;max-height:none!important;
-  margin-left:auto!important;margin-right:auto!important;display:block!important;}
-
-/* ═══ FIX: Player em tela cheia sem barras pretas ═══ */
-/* Corrige o bug onde o video em fullscreen ficava deslocado para cima
-   e centralizado, deixando barras pretas embaixo e nas laterais.
-   Causa: .gdi-player-wrap video { max-height:78vh } do app.min.js
-   continuava ativo em :fullscreen. */
-.gdi-player-wrap:fullscreen,
-.gdi-player-wrap:-webkit-full-screen,
-.gdi-player-wrap:-moz-full-screen,
-.gdi-player-wrap:-ms-fullscreen {
-  width:100vw!important; height:100vh!important; max-width:none!important;
-  max-height:none!important; background:#000!important;
-  border-radius:0!important; border:0!important; box-shadow:none!important;
-  display:flex!important; align-items:center!important; justify-content:center!important;
-  padding:0!important; margin:0!important; overflow:hidden!important;
-}
-.gdi-player-wrap:fullscreen video,
-.gdi-player-wrap:-webkit-full-screen video,
-.gdi-player-wrap:-moz-full-screen video,
-.gdi-player-wrap:-ms-fullscreen video,
-.gdi-player-wrap:fullscreen .plyr,
-.gdi-player-wrap:-webkit-full-screen .plyr,
-.gdi-player-wrap:fullscreen .plyr__video-wrapper,
-.gdi-player-wrap:-webkit-full-screen .plyr__video-wrapper,
-.gdi-player-wrap:fullscreen .video-js,
-.gdi-player-wrap:-webkit-full-screen .video-js,
-.gdi-player-wrap:fullscreen .dplayer,
-.gdi-player-wrap:-webkit-full-screen .dplayer,
-.gdi-player-wrap:fullscreen .dplayer-video-wrap,
-.gdi-player-wrap:-webkit-full-screen .dplayer-video-wrap,
-.gdi-player-wrap:fullscreen .dplayer-video,
-.gdi-player-wrap:-webkit-full-screen .dplayer-video,
-.gdi-player-wrap:fullscreen .jwplayer,
-.gdi-player-wrap:-webkit-full-screen .jwplayer,
-.gdi-player-wrap:fullscreen #player,
-.gdi-player-wrap:-webkit-full-screen #player,
-.gdi-player-wrap:fullscreen #vplayer,
-.gdi-player-wrap:-webkit-full-screen #vplayer,
-.gdi-player-wrap:fullscreen #player-container,
-.gdi-player-wrap:-webkit-full-screen #player-container,
-.gdi-player-wrap:fullscreen iframe,
-.gdi-player-wrap:-webkit-full-screen iframe {
-  width:100%!important; height:100%!important;
-  max-width:none!important; max-height:none!important;
-  object-fit:contain!important;
-  margin:0 auto!important; padding:0!important;
-  display:block!important; background:#000!important;
-  border-radius:0!important; border:0!important;
-}
-.gdi-player-wrap:fullscreen video::-webkit-media-controls-overlay-enclosure,
-.gdi-player-wrap:-webkit-full-screen video::-webkit-media-controls-overlay-enclosure { display:block!important; }
-.gdi-player-wrap:fullscreen .plyr--full-ui input[type=range],
-.gdi-player-wrap:-webkit-full-screen .plyr--full-ui input[type=range] { width:100%!important; }
-`;
+  margin-left:auto!important;margin-right:auto!important;display:block!important;}`;
     document.head.appendChild(s);
   }
   function isDone(){
