@@ -650,7 +650,8 @@
   // ★ Expõe startSession no window para que o M9-ISA (botão "Resolver
   // agora →" após gerar questões) possa chamar a sessão interativa
   // diretamente sobre o bodyEl da aula, sem precisar abrir a Central.
-  
+  window.__gdiStartSession=startSession;
+
   // ★ Expõe gradeQ para o quiz do M9-ISA (interativo na aba de questões)
   window.__gdiGradeQ=gradeQ;
 
@@ -1178,6 +1179,8 @@
       const body=panel.querySelector('#gdi-central-body');
       if(body&&body.__simTimer){clearInterval(body.__simTimer);body.__simTimer=null;}
       tab=b.dataset.t;FC.active=false;renderPanel();
+      // ★ expõe tab atual para que outros módulos possam detectar
+      window.__gdiCurrentTab=tab;
     });
     const body=panel.querySelector('#gdi-central-body');
     if(tab==='addmateria'){showAddCourseModal(body);return;}
@@ -1307,17 +1310,17 @@
         if(target){
           contBtn.disabled=false;
           // ★ botão "Ir para Drive" (abre pasta do curso no Drive)
-        const driveBtn=el.querySelector('.gdi-course-drive')||document.createElement('button');
-        if(!el.querySelector('.gdi-course-drive')){
+        const driveBtn=card.querySelector('.gdi-course-drive')||document.createElement('button');
+        if(!card.querySelector('.gdi-course-drive')){
           driveBtn.className='gdi-mode-btn gdi-course-drive';
           driveBtn.style.cssText='font-size:11px;padding:4px 10px;flex:none;';
           driveBtn.innerHTML='<i class="bi bi-folder2-open"></i> Drive';
           driveBtn.title='Abrir no Drive';
-          driveBtn.onclick=(e)=>{e.stopPropagation();if(c.key)window.location.href=c.key;};
+          driveBtn.onclick=(e)=>{e.stopPropagation();if(ck)window.location.href=ck;};
           // inserir antes do botão remover
-          const removeBtn=el.querySelector('.gdi-course-remove');
+          const removeBtn=card.querySelector('.gdi-course-remove');
           if(removeBtn)removeBtn.parentNode.insertBefore(driveBtn,removeBtn);
-          else el.querySelector('.gdi-course-head').appendChild(driveBtn);
+          else if(card.querySelector('.gdi-course-head'))card.querySelector('.gdi-course-head').appendChild(driveBtn);
         }
         contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
           contBtn.onclick=async(e)=>{
@@ -2767,17 +2770,17 @@
       if(target){
         contBtn.disabled=false;
         // ★ botão "Ir para Drive" (abre pasta do curso no Drive)
-        const driveBtn=el.querySelector('.gdi-course-drive')||document.createElement('button');
-        if(!el.querySelector('.gdi-course-drive')){
+        const driveBtn=box.querySelector('.gdi-course-drive')||document.createElement('button');
+        if(!box.querySelector('.gdi-course-drive')){
           driveBtn.className='gdi-mode-btn gdi-course-drive';
           driveBtn.style.cssText='font-size:11px;padding:4px 10px;flex:none;';
           driveBtn.innerHTML='<i class="bi bi-folder2-open"></i> Drive';
           driveBtn.title='Abrir no Drive';
           driveBtn.onclick=(e)=>{e.stopPropagation();if(c.key)window.location.href=c.key;};
           // inserir antes do botão remover
-          const removeBtn=el.querySelector('.gdi-course-remove');
+          const removeBtn=box.querySelector('.gdi-course-remove');
           if(removeBtn)removeBtn.parentNode.insertBefore(driveBtn,removeBtn);
-          else el.querySelector('.gdi-course-head').appendChild(driveBtn);
+          else if(box.querySelector('.gdi-course-head'))box.querySelector('.gdi-course-head').appendChild(driveBtn);
         }
         contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,40))}`;
         contBtn.onclick=async()=>{
@@ -3333,8 +3336,46 @@
 
   log('área do aluno ativa (v2.6 — aba na navbar, sem observer loop)');
 
-  // PLANO A v2: Bootstrap robusto — Após login, redireciona para ?central=1
-// (bootstrap removido — Central abre via botão da navbar como antes)
+  // ★ Expõe funções no window para que gdiAddCourseFromDrive e outros módulos
+  // possam re-renderizar a aba "cursos" quando o state muda.
+  window.renderCursos=function(box){
+    if(!box)box=document.getElementById('gdi-central-body');
+    if(box)renderCursos(box);
+  };
+  window.gdiRefreshCentralPanel=function(){
+    const body=document.getElementById('gdi-central-body');
+    if(!body)return;
+    if(window.__gdiCurrentTab==='cursos')renderCursos(body);
+    else if(window.__gdiCurrentTab==='home')renderHome(body);
+  };
+
+  // ★ Listener: quando background scan termina (gdiScanCourseProgressInBackground),
+  // atualiza tile do curso na Área do Aluno.
+  document.addEventListener('gdi:progress-updated', (ev)=>{
+    try{
+      const d=ev.detail||{};
+      // se estamos na aba cursos, re-renderiza a lista
+      if(window.__gdiCurrentTab==='cursos'){
+        const body=document.getElementById('gdi-central-body');
+        if(body&&typeof renderCursos==='function')renderCursos(body);
+      }
+      // se existe um tile do curso aberto, atualiza o progresso dele
+      if(d.coursePath){
+        const tiles=document.querySelectorAll('[data-course-key="'+d.coursePath.replace(/"/g,'\\"')+'"]');
+        tiles.forEach(t=>{
+          try{
+            const fill=t.querySelector('.gdi-progress-fill')||t.querySelector('div[style*="border-radius:4px;transition:width"]');
+            const pctEl=t.querySelector('[data-stat="pct"]')||t.querySelector('.gdi-course-stat-num');
+            if(fill&&typeof d.watched==='number'&&typeof d.totalLessons==='number'){
+              const pct=d.totalLessons?Math.round(d.watched/d.totalLessons*100):0;
+              fill.style.width=pct+'%';
+              if(pctEl)pctEl.textContent=pct+'%';
+            }
+          }catch(_){}
+        });
+      }
+    }catch(_){}
+  });
 })();
 
 // ═══════════════════════════════════════════════════════════════
