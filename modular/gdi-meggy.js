@@ -24,8 +24,7 @@
   if(window.__gdiM9Isa)return;window.__gdiM9Isa=true;
   const LS_SUM='gdi-isa-summaries-v1';
   const LQ='gdi-questions-v1';
-  // ★ Fix: escapar " e ' para evitar XSS via attribute injection
-  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(_){return d}};
   const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}};
   const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -2208,8 +2207,7 @@
     }
     return txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
   }
-  // ★ Fix: versão completa com escape de " e ' (segurança XSS)
-  function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
   // ── Detecção da IA do navegador ──
   // Chrome 127+ com "Prompt API for Gemini Nano" habilitado expõe

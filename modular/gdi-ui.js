@@ -1365,7 +1365,7 @@ window.GDI_MODULES.push({name:'debug',init:function(){
       _plLen=n;
       if(n>0){ensureUI();refreshAll();}
     }
-    if(++_plPoll<80)setTimeout(_plPollFn,750); // ~60s
+    if(++_plPoll<80&&_plPoll<80)setTimeout(_plPollFn,750); // ~60s
   }
   setTimeout(_plPollFn,500);
   Bus.onGlobal('watched:changed',()=>setTimeout(refreshAll,30));
