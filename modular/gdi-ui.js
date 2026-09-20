@@ -690,6 +690,9 @@ body.gdi-fv .plyr:-webkit-full-screen {
     const href=a.getAttribute('href')||'';
     if(!href||!href.startsWith('/'))return;
     ev.preventDefault();
+    // feedback visual enquanto encurta a URL
+    const originalHTML=a.innerHTML;
+    try{a.style.pointerEvents='none';a.innerHTML='<i class="bi bi-hourglass-split"></i> Abrindo...';}catch(_){}
     try{
       const r=await fetch(href,{method:'HEAD',redirect:'manual',credentials:'same-origin'});
       if(r.status>=300&&r.status<400){
@@ -697,7 +700,17 @@ body.gdi-fv .plyr:-webkit-full-screen {
         if(/login/i.test(loc)){showToast('Sess\u00e3o expirada \u2014 entre para retomar');location.href='/login';return;}
       }
     }catch(_){}
-    location.href=href;
+    // ★ URL CURTA: tenta registrar no KV e navega para /f/<id> se bem-sucedido
+    let finalHref=href;
+    try{
+      if(window.GDIStorage&&typeof window.GDIStorage.getShortUrl==='function'){
+        // remove ?a=view temporariamente para registrar o path puro
+        const pathOnly=href.replace(/[?&]a=view$/,'');
+        const short=await window.GDIStorage.getShortUrl(pathOnly);
+        if(short&&short.indexOf('/f/')===0)finalHref=short+(short.includes('?')?'&':'?')+'a=view';
+      }
+    }catch(_){}
+    location.href=finalHref;
   }
   function nameInfo(target){
     const cur=normPath(window.location.pathname);

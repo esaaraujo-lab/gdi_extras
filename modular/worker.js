@@ -748,23 +748,6 @@ async function gdiIsaCacheWrite(gd0, folderId, data){
   return r.ok;
 }
 
-// ★ NOVO: lista todas as chaves do cache ISA (para o frontend recuperar resumos)
-async function handleIsaCacheList(request){
-  const cors={'Access-Control-Allow-Origin':'*','Content-Type':'application/json;charset=UTF-8'};
-  const user=await gdiSessionUser(request);
-  if(!user)return new Response(JSON.stringify({ok:false,error:'auth'}),{status:401,headers:cors});
-  const gd0=gds[0];if(!gd0)return new Response(JSON.stringify({ok:false,error:'no drive'}),{status:502,headers:cors});
-  const folderId=await gdiUserFolderId(gd0);
-  if(!folderId)return new Response(JSON.stringify({ok:true,entries:[]}),{headers:cors});
-  const cache=await gdiIsaCacheRead(gd0, folderId);
-  // retorna só metadados (não o conteúdo completo — seria muito grande)
-  const entries=Object.keys(cache).map(k=>{
-    const e=cache[k]||{};
-    return {key:k,lessonName:e.lessonName||'',hasSummary:!!e.summary,hasQuestions:!!(e.questions&&e.questions.length),hasMindmap:!!e.mindmap,outdated:!!e.outdated,battalionDone:!!e.battalionDone,date:e.date||e.battalionDate||0};
-  }).sort((a,b)=>(b.date||0)-(a.date||0));
-  return new Response(JSON.stringify({ok:true,entries,total:entries.length}),{headers:{...cors,'Cache-Control':'no-store'}});
-}
-
 async function handleIsaCacheGet(request, url){
   const gd0=gds[0];
   const user=await gdiSessionUser(request);
@@ -1271,6 +1254,14 @@ function isHiddenPath(path) {
 // ═══════════════════════════════════════════════════════════════
 // handleRequest
 // ═══════════════════════════════════════════════════════════════
+
+// ═══ URL CURTA: /f/<id> → redireciona para caminho completo ═══
+function shortUrlId(path){
+  let hash=0;
+  for(let i=0;i<path.length;i++) hash=((hash<<5)-hash+path.charCodeAt(i))|0;
+  return 'f'+Math.abs(hash).toString(36).padStart(6,'0').slice(0,8);
+}
+
 async function handleRequest(request, event) {
   // ═══ PAINEL DO PROFESSOR — /admin ═══
   const ADMIN_USERS = ['elton@araujo.eu.org'];
@@ -1787,10 +1778,38 @@ self.addEventListener('fetch',function(e){
   if (path === '/api/brain/list' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
   if (path === '/api/brain/save' && request.method === 'POST') return handleBrainSave(request);
   if (path === '/api/brain/save' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
-  if (path === '/api/ai/cache' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
-  // ★ NOVO: lista todo o cache ISA do aluno (para recuperar resumos que sumiram do localStorage)
-  if (path === '/api/ai/cache/list' && request.method === 'GET') return handleIsaCacheList(request);
   if (path === '/api/ai/cache/list' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  // ★ URL CURTA: /f/<id> → redirect para caminho completo (via KV)
+  if (path.startsWith('/f/') && request.method === 'GET' && path.length > 3) {
+    const shortId = path.slice(3).split('?')[0];
+    let fullPath = null;
+    if (typeof ENV !== 'undefined' && ENV) {
+      try { fullPath = await ENV.get('shorturl:' + shortId); } catch(_) {}
+    }
+    if (fullPath) {
+      const sep = fullPath.includes('?') ? '&' : '?';
+      return Response.redirect(fullPath + sep + 'a=view', 302);
+    }
+    return new Response('Not found', { status: 404 });
+  }
+  // ★ Registrar URL curta: POST /api/shorturl/register
+  if (path === '/api/shorturl/register' && request.method === 'POST') {
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json;charset=UTF-8' };
+    const user = await gdiSessionUser(request);
+    if (!user) return new Response(JSON.stringify({ok:false,error:'auth'}), {status:401, headers:cors});
+    let body;
+    try { body = await request.json(); } catch(_) { return new Response(JSON.stringify({ok:false}), {status:400, headers:cors}); }
+    const fullPath = String(body.path || '').slice(0, 500);
+    if (!fullPath) return new Response(JSON.stringify({ok:false}), {status:400, headers:cors});
+    const id = shortUrlId(fullPath);
+    const shortUrl = '/f/' + id;
+    if (typeof ENV !== 'undefined' && ENV) {
+      try { await ENV.put('shorturl:' + id, fullPath, { expirationTtl: 2592000 }); } catch(_) {}
+    }
+    return new Response(JSON.stringify({ ok:true, shortUrl, id }), { headers: cors });
+  }
+  if (path === '/api/shorturl/register' && request.method === 'OPTIONS') return new Response(null, { status:204, headers: { 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Methods':'POST,OPTIONS', 'Access-Control-Allow-Headers':'Content-Type' } });
+  if (path === '/api/ai/cache' && request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
   if (path === '/api/ai/models' && request.method === 'GET') {
     // Diagnóstico: lista modelos disponíveis na NVIDIA NIM da conta.
     const nvidiaKey = globalThis.NVIDIA_API_KEY;
@@ -2173,7 +2192,7 @@ async function runBattalionInBackground(courseKey, coursePath, lessonName, pdfLi
 
     // se já existe cache ISA para este curso, pula
     const cache = await gdiIsaCacheRead(gd0, folderId);
-    if(cache[courseKey] && cache[courseKey].battalionDone){ console.log('[Battalion] curso já processado — pulando'); return; }
+    if(cache[courseKey] && cache[courseKey].summary && cache[courseKey].questions){ return; }
 
     // ★ FIX: se pdfList vazio, escaneia coursePath no Drive
     if(!pdfList || !pdfList.length){

@@ -231,5 +231,23 @@
     listSharedFlashcards,
   };
 
+  // Helper global para navegação com URL curta.
+  // Recebe path longo (ex: /7:/TJ SP/.../video.mp4)
+  // Devolve URL final pronta para location.href (com ?a=view)
+  // Falha silenciosamente para o path longo original em caso de erro.
+  window.gdiShortNavigate = async function(target){
+    const t = String(target||'');
+    if(!t) return t;
+    try{
+      if(window.GDIStorage && typeof window.GDIStorage.getShortUrl==='function'){
+        const short = await window.GDIStorage.getShortUrl(t);
+        if(short && short.indexOf('/f/')===0){
+          return short + (short.includes('?')?'&':'?') + 'a=view';
+        }
+      }
+    }catch(_){}
+    return t + (t.includes('?')?'&':'?') + 'a=view';
+  };
+
   console.log('[GDI Storage] Drive v1 carregado');
 })();

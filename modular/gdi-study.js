@@ -1320,7 +1320,12 @@
           else el.querySelector('.gdi-course-head').appendChild(driveBtn);
         }
         contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
-          contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
+          contBtn.onclick=async(e)=>{
+            e.stopPropagation();
+            try{contBtn.dataset.orig=contBtn.innerHTML;contBtn.innerHTML='<i class="bi bi-hourglass-split"></i> Abrindo...';contBtn.style.pointerEvents='none';}catch(_){}
+            const finalUrl=await window.gdiShortNavigate(target);
+            location.href=finalUrl;
+          };
         }else{
           contBtn.disabled=true;
           contBtn.className='gdi-btn-continue gdi-btn-done';
@@ -1969,7 +1974,12 @@
           else el.querySelector('.gdi-course-head').appendChild(driveBtn);
         }
         contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,30))}`;
-            contBtn.onclick=(e)=>{e.stopPropagation();location.href=target+(target.includes('?')?'&':'?')+'a=view';};
+            contBtn.onclick=async(e)=>{
+              e.stopPropagation();
+              try{contBtn.dataset.orig=contBtn.innerHTML;contBtn.innerHTML='<i class="bi bi-hourglass-split"></i> Abrindo...';contBtn.style.pointerEvents='none';}catch(_){}
+              const finalUrl=await window.gdiShortNavigate(target);
+              location.href=finalUrl;
+            };
           }else{
             contBtn.disabled=true;
             contBtn.className='gdi-btn-continue gdi-btn-done';
@@ -2763,7 +2773,11 @@
           else el.querySelector('.gdi-course-head').appendChild(driveBtn);
         }
         contBtn.innerHTML=`<i class="bi bi-play-fill"></i> Continuar: ${escHtml(realName(target).slice(0,40))}`;
-        contBtn.onclick=()=>{location.href=target+(target.includes('?')?'&':'?')+'a=view';};
+        contBtn.onclick=async()=>{
+          try{contBtn.dataset.orig=contBtn.innerHTML;contBtn.innerHTML='<i class="bi bi-hourglass-split"></i> Abrindo...';contBtn.style.pointerEvents='none';}catch(_){}
+          const finalUrl=await window.gdiShortNavigate(target);
+          location.href=finalUrl;
+        };
       }else{
         contBtn.disabled=true;
         contBtn.className='gdi-mode-btn';
@@ -2773,9 +2787,12 @@
     });
     // clicar numa aula → abrir
     box.querySelectorAll('[data-path]').forEach(el=>{
-      el.onclick=()=>{
+      el.onclick=async()=>{
         const p=el.dataset.path;
-        if(p)location.href=p+(p.includes('?')?'&':'?')+'a=view';
+        if(!p)return;
+        try{el.dataset.orig=el.innerHTML;el.innerHTML='<i class="bi bi-hourglass-split"></i> Abrindo...';}catch(_){}
+        const finalUrl=await window.gdiShortNavigate(p);
+        location.href=finalUrl;
       };
     });
   }
