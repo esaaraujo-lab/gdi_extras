@@ -91,6 +91,42 @@ body.gdi-fv .gdi-player-wrap iframe{
 .gdi-player-wrap:-webkit-full-screen video::-webkit-media-controls-overlay-enclosure { display:block!important; }
 .gdi-player-wrap:fullscreen .plyr--full-ui input[type=range],
 .gdi-player-wrap:-webkit-full-screen .plyr--full-ui input[type=range] { width:100%!important; }
+
+/* ═══ FIX: SPLIT MODE (desktop) — vídeo preenche a largura, sem barras pretas ═══ */
+/* Causa: em split mode (.gdi-study-grid 58fr/42fr), o player tem só 58% da largura.
+   Um vídeo 16:9 a 58% de largura é bem mais baixo que 78vh, mas o wrap mantinha
+   max-height:78vh (criado pelo app.min.js antigo), forçando o vídeo a ser letterboxed
+   dentro do wrap (background:#000) — barras pretas enormes em cima/embaixo.
+   Solução: o wrap tem aspect-ratio:16/9 (já definido no app.min.js) e o vídeo
+   preenche 100% do wrap com object-fit:contain. Estas regras garantem que os
+   wrappers de Plyr/video.js/DPlayer também preencham o wrap corretamente. */
+/* ★ Task 25: split mode — player fills the 58% column without black bars */
+.gdi-study-grid .gdi-player-wrap{width:100%!important;height:auto!important;aspect-ratio:16/9!important;}
+.gdi-study-grid .gdi-player-wrap video,
+.gdi-study-grid .gdi-player-wrap .plyr,
+.gdi-study-grid .gdi-player-wrap .plyr__video-wrapper,
+.gdi-study-grid .gdi-player-wrap .video-js,
+.gdi-study-grid .gdi-player-wrap .vjs-tech,
+.gdi-study-grid .gdi-player-wrap .dplayer,
+.gdi-study-grid .gdi-player-wrap .dplayer-video-wrap,
+.gdi-study-grid .gdi-player-wrap .dplayer-video,
+.gdi-study-grid .gdi-player-wrap .jwplayer,
+.gdi-study-grid .gdi-player-wrap .jw-video,
+.gdi-study-grid .gdi-player-wrap #player,
+.gdi-study-grid .gdi-player-wrap #vplayer,
+.gdi-study-grid .gdi-player-wrap #player-container,
+.gdi-study-grid .gdi-player-wrap iframe {
+  max-height:none!important;
+  height:100%!important;
+  width:100%!important;
+  object-fit:contain!important;
+  display:block!important;
+}
+.gdi-study-grid .gdi-player-wrap {
+  height:auto!important;
+  aspect-ratio:16/9!important;
+  max-height:none!important;
+}
 `;
     document.head.appendChild(s);
   }
@@ -720,9 +756,17 @@ body.gdi-fv .gdi-player-wrap iframe{
   const vCache=new Map();
   function verify(path){
     if(vCache.has(path))return Promise.resolve(vCache.get(path));
-    const pr=fetch(path,{method:'POST',credentials:'same-origin'})
-      .then(r=>{vCache.set(path,r.ok);return r.ok})
-      .catch(()=>{vCache.set(path,true);return true});
+    // ★ Task 17b: usa GET em vez de POST — POST em URL de arquivo (video.mp4)
+    // retorna 404 e polui o console. GET funciona pra pastas E arquivos.
+    // O cache 'no-store' evita cache de HEAD/GET de verificação.
+    const pr=fetch(path,{method:'GET',credentials:'same-origin',cache:'no-store'})
+      .then(r=>{
+        // 200-299 = existe; 3xx = redirect (também existe); 404 = não existe
+        const ok = r.ok || (r.status >= 300 && r.status < 400);
+        vCache.set(path,ok);
+        return ok;
+      })
+      .catch(()=>{vCache.set(path,true);return true});  // erro de rede = assume que existe
     vCache.set(path,pr);
     return pr;
   }
@@ -843,7 +887,15 @@ body.gdi-fv .gdi-player-wrap iframe{
       </div>`;
     }
     html+='</div>';
-    host.insertAdjacentHTML('afterbegin',html);
+    // ★ FIX 2 (Task 23): insert at the END of .gdi-wrap (beforeend), not the
+    // beginning (afterbegin). The .gdi-wrap structure is:
+    //   #update (alerts) → #head_md (md header) → .gdi-breadcrumb-wrap (breadcrumb)
+    //   → .gdi-panel (folder list + toolbar + #list + #count) → #readme_md
+    // Inserting at afterbegin put the card ABOVE the breadcrumb — covering the
+    // folder list and pushing it down. Inserting at beforeend puts the card
+    // below the folder list panel (after #readme_md, which is display:none by
+    // default), so the user sees: breadcrumb → toolbar → folder list → card.
+    host.insertAdjacentHTML('beforeend',html);
     // ★FIX: listeners presos ao CARD (antes pegava todos [data-gdi-go] do wrapper)
     const card=document.getElementById('gdi-home-card');
     if(card){
@@ -871,20 +923,46 @@ body.gdi-fv .gdi-player-wrap iframe{
 // ═══ M14: PROGRESSOS ═══
 (function(){
   let busy=false;
+  // ★U.6: guard flag — o MutationObserver em #count disparava line() quando
+  // a própria line() inseria #gdi-progress-line como sibling, criando um
+  // loop de re-render. O flag corta o disparo durante a mutação.
+  let __m14Mutating=false;
+  // ★FIX (Task 8): busy guard — impede modProgress de rodar concorrentemente.
+  // Antes: se schedule() disparasse runAll() 2× seguidas (DOMContentLoaded +
+  // page:change), modProgress iniciava 2 conjuntos de workers em paralelo,
+  // cada um re-escaneando as mesmas subpastas (o filtro !a.querySelector('.gdi-modprog')
+  // não pegava porque o 1º conjunto ainda não tinha inserido os badges).
+  // Resultado: 2× fetches + 2× loops síncronos sobre os mesmos arquivos.
+  // Agora: o 2º disparo retorna imediatamente se o 1º ainda está em andamento.
+  let _mpBusy=false;
   function modProgress(){
     if(!GDIUser.loaded())return;
+    if(_mpBusy)return;  // ★ busy guard — não acumular workers concorrentes
     const rows=[...document.querySelectorAll('#list a.gdi-row')]
       .filter(a=>a.querySelector('.gdi-row-icon i.bi-folder-fill')&&!a.querySelector('.gdi-modprog'))
-      .slice(0,30);
-    (async()=>{
-      for(const row of rows){
+      .slice(0,8);  // ★ Task 8: cap em 8 (era 30) — reduz freeze do M14 (não fazer DOS no servidor)
+    if(!rows.length)return;
+    _mpBusy=true;  // ★ marca como em andamento
+    // ★U.3: Promise.all com concorrência 6 (antes: sequencial + sleep 40ms).
+    // Mesmo número de fetches, mas em paralelo — tempo total cai ~6x.
+    const CONC=6;
+    let cursor=0;
+    async function worker(){
+      while(cursor<rows.length){
+        const row=rows[cursor++];
         if(!document.body.contains(row))continue;  // ★FIX: era return, interrompia o loop todo
         const href=row.getAttribute('href')||'';
         if(!href||href.startsWith('/fallback'))continue;
-        const files=await gdiListAllFiles(href,gdiGetPw(href));
+        let files;
+        try{files=await gdiListAllFiles(href,gdiGetPw(href));}catch(_){continue;}
         if(!document.body.contains(row))continue;
         let total=0,done=0;
-        for(const f of files){
+        // ★FIX (Task 8): cap síncrono em 800 iterações para evitar jank em
+        // pastas gigantes. Se passar de 800, o progresso é uma aproximação
+        // (suficiente para mostrar X/Y sem travar a thread).
+        const MAX_ITER=800;
+        for(let _i=0,_n=Math.min(files.length,MAX_ITER);_i<_n;_i++){
+          const f=files[_i];
           if(f.mimeType==='application/vnd.google-apps.folder')continue;
           if(!FILE_TYPES.video.includes((f.fileExtension||'').toLowerCase()))continue;
           if(/\.part-/i.test(f.name))continue;
@@ -900,11 +978,18 @@ body.gdi-fv .gdi-player-wrap iframe{
           el.title='Progresso de v\u00eddeos nesta pasta';
           row.querySelector('.gdi-row-acts')?.appendChild(el);
         }
-        await sleep(40);
+        // ★U.3: sem await sleep(40) — paralelismo já regula a carga
       }
-    })();
+    }
+    const ws=[];
+    for(let i=0;i<Math.min(CONC,rows.length);i++)ws.push(worker());
+    Promise.all(ws).catch(()=>{}).finally(()=>{_mpBusy=false;});  // ★ libera o busy guard
   }
   function line(){
+    // ★U.6: flag ativo durante a mutação — o MutationObserver ignora disparos
+    // que acontecerem enquanto este flag estiver true.
+    __m14Mutating=true;
+    try{
     const countEl=document.getElementById('count');
     if(!countEl||!countEl.classList.contains('show')){document.getElementById('gdi-progress-line')?.remove();return;}
     const rows=document.querySelectorAll('#list div.gdi-row');
@@ -937,6 +1022,11 @@ body.gdi-fv .gdi-player-wrap iframe{
     el.innerHTML=html;
     el.querySelector('#gdi-next-lesson')?.addEventListener('click',function(){location.href=this.dataset.href;});
     el.querySelector('#gdi-course-btn')?.addEventListener('click',course);
+    }finally{
+      // ★U.6: limpa o flag em macrotask (depois de qualquer microtask do
+      // MutationObserver) para evitar loop.
+      setTimeout(()=>{__m14Mutating=false;},0);
+    }
   }
   async function course(){
     if(busy)return;busy=true;
@@ -975,7 +1065,8 @@ body.gdi-fv .gdi-player-wrap iframe{
     if(c&&!c.__m14){c.__m14=true;
       // ★FIX: desconecta o observer da página anterior (vazamento por página)
       if(window.__gdiM14obs){try{window.__gdiM14obs.disconnect()}catch(_){}}
-      const obs=new MutationObserver(()=>line());
+      // ★U.6: callback pula se __m14Mutating — evita feedback loop.
+      const obs=new MutationObserver(()=>{if(!__m14Mutating)line();});
       obs.observe(c,{childList:true,characterData:true,subtree:true});
       window.__gdiM14obs=obs;}
     line();modProgress();
@@ -1077,7 +1168,9 @@ window.GDI_MODULES.push({name:'debug',init:function(){
     new MutationObserver(apply).observe(el,{childList:true,characterData:true,subtree:true});
   }
   bindTitle();
-  setInterval(apply,1500);
+  // ★U.5: setInterval(apply,1500) removido — o MutationObserver em <title>
+  // já dispara apply() quando o título muda, e Bus.onGlobal('title:change')
+  // cobre mudanças externas. O intervalo era redundante.
   Bus.onGlobal('page:change',apply);
   Bus.onGlobal('title:change',apply);
   Bus.onGlobal('video:switched',()=>setTimeout(apply,150));
@@ -1091,9 +1184,13 @@ window.GDI_MODULES.push({name:'debug',init:function(){
 // O MutationObserver que vivia aqui se auto-disparava infinitamente
 // quando o render demorava >150ms (playlists grandes) — era o loop
 // que travava a aba para sempre. Removido. Re-render só via Bus.
-// Também: teto de 600 itens no DOM e UM listener delegado.
+// ★U.1: paginação 100-itens + botão "Carregar mais" (antes: 600-itens cap
+//        renderizado de uma vez via innerHTML).
+// ★U.2: polling 60s removido — evento Bus 'playlist:ready' dispara o refresh.
 (function(){
-  const LS_OPEN='gdi-playlist-open',LS_HIDE='gdi-hide-watched',PL_CAP=600;
+  const LS_OPEN='gdi-playlist-open',LS_HIDE='gdi-hide-watched';
+  const PL_PAGE=100,PL_MAX=3000;  // ★U.1: página de 100, teto absoluto 3000
+  let _plVisibleCount=0;  // ★U.1: quantos itens estão no DOM agora
   const norm=p=>{try{return decodeURIComponent(String(p||'').split('?')[0])}catch(_){return String(p||'').split('?')[0]}};
   window.gdiNormKey=norm;
   window.gdiVideoKey=function(){
@@ -1128,27 +1225,73 @@ window.GDI_MODULES.push({name:'debug',init:function(){
     try{if((a||b)&&!c)GDIUser.markWatched(window.location.pathname);
         if(c&&!(a||b))GDIUser.markWatched(norm(raw));}catch(_){}
   }
-  function renderItems(){
-    const list=document.getElementById('gdi-playlist-list');
-    if(!list)return;
-    const pv=items(),ci=cur();
-    if(!pv.length){list.innerHTML='<div class="gdi-notes-empty">Nenhuma aula encontrada.</div>';return;}
+  // ★U.1: helper — renderiza um intervalo [fromIdx, toIdx) da playlist
+  function _renderPlaylistRange(pv,fromIdx,toIdx,ci){
     const hide=localStorage.getItem(LS_HIDE)==='1';
-    const shown=pv.length>PL_CAP?pv.slice(0,PL_CAP):pv;
     let h='';
-    shown.forEach((m,idx)=>{
+    for(let idx=fromIdx;idx<toIdx;idx++){
+      const m=pv[idx];if(!m)break;
       const w=isW(m),c=idx===ci;
-      if(hide&&w&&!c)return;
+      if(hide&&w&&!c)continue;
       const nm=m.name||m.origName||'(sem nome)';
       h+=`<div class="gdi-playlist-item${c?' cur':''}${w&&!c?' watched':''}" data-idx="${idx}" title="${escHtml(nm)}">
         <div><i class="bi bi-${c?'play-fill':w?'check-circle-fill':'film'} me-2"></i><span style="font-weight:${c?'600':'400'};">${escHtml(nm)}</span></div>
         <span class="gdi-pl-size">${w?'\u2713 ':''}${escHtml(m.size||'')}</span>
       </div>`;
-    });
-    if(pv.length>shown.length)h+=`<div style="padding:6px 12px;font-size:11px;color:var(--ferreto-text-muted,#8b949e);">\u2026 +${pv.length-shown.length} aulas (Pr\u00f3xima/Anterior e a tecla J alcan\u00e7am todas)</div>`;
-    list.innerHTML=h||'<div class="gdi-notes-empty">Todas assistidas (filtro ativo).</div>';
-    if(pv[ci]){const el=list.querySelector('.gdi-playlist-item[data-idx="'+ci+'"]');
+    }
+    return h;
+  }
+  function _scrollToCurrent(list,ci){
+    if(items()[ci]){const el=list.querySelector('.gdi-playlist-item[data-idx="'+ci+'"]');
       if(el)try{el.scrollIntoView({block:'nearest'})}catch(_){}}
+  }
+  function _attachLoadMore(list,pv){
+    // ★U.1: se ainda há itens além do visível (ou além do PL_MAX), mostra o botão
+    const ceiling=Math.min(pv.length,PL_MAX);
+    if(_plVisibleCount>=ceiling){
+      if(pv.length>PL_MAX){
+        const notice=document.createElement('div');
+        notice.style.cssText='padding:6px 12px;font-size:11px;color:var(--ferreto-text-muted,#8b949e);';
+        notice.textContent='\u2026 +'+(pv.length-PL_MAX)+' aulas (Pr\u00f3xima/Anterior e a tecla J alcan\u00e7am todas)';
+        list.appendChild(notice);
+      }
+      return;
+    }
+    const remaining=ceiling-_plVisibleCount;
+    const btn=document.createElement('button');
+    btn.className='gdi-pl-loadmore gdi-mode-btn';
+    btn.style.cssText='display:block;width:100%;margin:8px 0;padding:6px 10px;font-size:12px;text-align:center;';
+    btn.textContent='Carregar mais ('+remaining+' restantes)';
+    btn.addEventListener('click',()=>{
+      btn.remove();
+      const fromIdx=_plVisibleCount;
+      const toIdx=Math.min(_plVisibleCount+PL_PAGE,ceiling);
+      const ci=cur();
+      const html=_renderPlaylistRange(pv,fromIdx,toIdx,ci);
+      list.insertAdjacentHTML('beforeend',html);  // ★U.1: append sem re-parse
+      _plVisibleCount=toIdx;
+      _attachLoadMore(list,pv);
+      _scrollToCurrent(list,ci);
+    });
+    list.appendChild(btn);
+  }
+  function renderItems(){
+    const list=document.getElementById('gdi-playlist-list');
+    if(!list)return;
+    const pv=items(),ci=cur();
+    if(!pv.length){list.innerHTML='<div class="gdi-notes-empty">Nenhuma aula encontrada.</div>';_plVisibleCount=0;return;}
+    // ★U.1: paginação — renderiza só os primeiros PL_PAGE itens. Se o
+    // currentIndex estiver além da janela visível (ex.: tecla J pulou para
+    // a aula 250), expande automaticamente para incluir o índice atual.
+    let target=PL_PAGE;
+    if(ci>=PL_PAGE){
+      target=(Math.floor(ci/PL_PAGE)+1)*PL_PAGE;
+    }
+    _plVisibleCount=Math.min(target,Math.min(pv.length,PL_MAX));
+    list.innerHTML=_renderPlaylistRange(pv,0,_plVisibleCount,ci)
+      ||'<div class="gdi-notes-empty">Todas assistidas (filtro ativo).</div>';
+    _attachLoadMore(list,pv);
+    _scrollToCurrent(list,ci);
   }
   function renderMeta(){
     const pv=items(),ci=cur();
@@ -1253,19 +1396,22 @@ window.GDI_MODULES.push({name:'debug',init:function(){
     }
     refreshAll();
   }});
-  // ★FIX: polling — buildPlaylist() no app.min.js é assíncrono; quando
-  // ele popula window.playlistVideos, o init já rodou. Re-renderiza
-  // quando detecta mudança no tamanho da playlist.
-  let _plLen=-1,_plPoll=0;
-  function _plPollFn(){
-    const n=items().length;
-    if(n!==_plLen){
-      _plLen=n;
-      if(n>0){ensureUI();refreshAll();}
+  // ★U.2: polling 60s removido (PATCH G). app.min.js (agente 4-a) emite
+  // Bus.emit('playlist:ready', playlistVideos) ao final do buildPlaylist.
+  // Esse listener dispara o refresh UMA vez quando a playlist está pronta.
+  let _plReadyFired=false;
+  Bus.onGlobal('playlist:ready',()=>{
+    _plReadyFired=true;
+    ensureUI();
+    refreshAll();
+  });
+  // ★U.2: fallback one-shot — se o evento não disparar em 3s (ex.: app.min.js
+  // antigo sem o emit), faz um refreshAll() para garantir.
+  setTimeout(()=>{
+    if(!_plReadyFired){
+      try{ensureUI();refreshAll();}catch(_){}
     }
-    if(++_plPoll<80&&_plPoll<80)setTimeout(_plPollFn,750); // ~60s
-  }
-  setTimeout(_plPollFn,500);
+  },3000);
   Bus.onGlobal('watched:changed',()=>setTimeout(refreshAll,30));
   Bus.onGlobal('video:switched',()=>setTimeout(refreshAll,120));
   Bus.onGlobal('user:ready',()=>setTimeout(refreshAll,60));

@@ -1,10 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
-// storage.js — Camada de Abstração de Armazenamento
+// storage.js — Camada de Abstração de Armazenamento — REFACTORED
 //
 // VERSÃO: DRIVE (Google Drive API)
 //
-// Todas as funções de persistência passam por este arquivo.
-// Para mudar de Drive para D1/KV, basta trocar este arquivo.
+// Mudanças não-breaking (mesmo window.GDIStorage API):
+//  1. Camada de memoização in-memory (LRU 200 entradas) para GETs.
+//  2. Removido {cache:'no-store'} dos GETs — deixa o HTTP cache agir.
+//  3. Invalidação exposta via GDIStorage.invalidate(key) e .clearCache().
+//  4. Cache Storage API (caches.open) para scan-course-progress.
 // ═══════════════════════════════════════════════════════════════
 
 (function(){
@@ -13,16 +16,48 @@
   const STORAGE_VERSION = 'drive-v1';
   const MEGGY_FOLDER = '.meggy.ai';
 
-  // ═══ Helpers de URL curta (compartilhados entre todas as versões) ═══
+  // ═════ Memoização in-memory + dedupe de in-flight ═════
+  const _mem = new Map();              // key -> { t, p }
+  const _MEM_MAX = 200;
 
-  // Gera ID curto e estável a partir de um path
+  function memo(key, ttlMs, fn){
+    const ent = _mem.get(key);
+    const now = Date.now();
+    if (ent && now - ent.t < ttlMs) return ent.p;          // hit
+    if (ent && ent.p) return ent.p;                        // in-flight dedupe
+    const p = fn().catch(err => { _mem.delete(key); throw err; });
+    _mem.set(key, { t: now, p });
+    if (_mem.size > _MEM_MAX) _mem.delete(_mem.keys().next().value);
+    return p;
+  }
+
+  function invalidate(keyPrefix){
+    if (!keyPrefix) { _mem.clear(); return; }
+    for (const k of _mem.keys()) if (k.indexOf(keyPrefix) === 0) _mem.delete(k);
+  }
+
+  // ═══ Cache Storage API (sobrevive a reloads) para pastas escaneadas ═══
+  const FOLDER_CACHE = 'gdi-folders-v1';
+  async function folderCacheGet(key){
+    try { const c = await caches.open(FOLDER_CACHE); const r = await c.match(key); return r ? await r.json() : null; }
+    catch(_) { return null; }
+  }
+  async function folderCachePut(key, data){
+    try { const c = await caches.open(FOLDER_CACHE); await c.put(key, new Response(JSON.stringify(data))); }
+    catch(_) {}
+  }
+  async function folderCacheDelete(key){
+    try { const c = await caches.open(FOLDER_CACHE); await c.delete(key); }
+    catch(_) {}
+  }
+
+  // ═══ Helpers de URL curta ═════
   function shortUrlId(path){
     let hash=0;
     for(let i=0;i<path.length;i++) hash=((hash<<5)-hash+path.charCodeAt(i))|0;
     return 'f'+Math.abs(hash).toString(36).padStart(6,'0').slice(0,8);
   }
 
-  // Registra mapeamento path → shortUrl no worker (via KV)
   async function getShortUrl(fullPath){
     try{
       const r=await fetch('/api/shorturl/register',{
@@ -35,7 +70,6 @@
     return fullPath;
   }
 
-  // Hash curto de lessonKey (estável, 8 chars)
   function shortLessonKey(path){
     const p=(path||window.location.pathname||'').split('?')[0];
     let hash=0;
@@ -43,7 +77,6 @@
     return 'L'+Math.abs(hash).toString(36);
   }
 
-  // Nome de arquivo deduplicável (hash estável, não timestamp)
   function materialFileName(coursePath, pdfName, kind){
     let hash=0;
     const str=coursePath+'/'+pdfName;
@@ -53,125 +86,133 @@
     return raw+'.md';
   }
 
-  // ═══ API de Storage (Drive) ═══
+  // ═══ API de Storage (Drive) — com cache ═════
 
-  // Lê cache ISA por lessonKey
   async function isaCacheGet(lessonKey){
-    try{
-      const r=await fetch('/api/ai/cache?key='+encodeURIComponent(lessonKey),{cache:'no-store'});
-      if(!r.ok)return null;
-      const d=await r.json();
-      return d&&d.ok?d.cached:null;
-    }catch(_){return null;}
+    return memo('isa:'+lessonKey, 60_000, async () => {
+      try{
+        const r=await fetch('/api/ai/cache?key='+encodeURIComponent(lessonKey));
+        if(!r.ok)return null;
+        const d=await r.json();
+        return d&&d.ok?d.cached:null;
+      }catch(_){return null;}
+    });
   }
 
-  // Salva cache ISA por lessonKey
   async function isaCacheSet(lessonKey, data){
     try{
       await fetch('/api/ai/cache',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({key:lessonKey,...data})});
+      invalidate('isa:'+lessonKey);
     }catch(_){}
   }
 
-  // Lista todo o cache ISA (para recuperar resumos que sumiram do localStorage)
   async function isaCacheList(){
-    try{
-      const r=await fetch('/api/ai/cache/list',{cache:'no-store'});
-      if(!r.ok)return [];
-      const d=await r.json();
-      return d&&d.ok&&Array.isArray(d.entries)?d.entries:[];
-    }catch(_){return [];}
+    return memo('isaList', 30_000, async () => {
+      try{
+        const r=await fetch('/api/ai/cache/list');
+        if(!r.ok)return [];
+        const d=await r.json();
+        return d&&d.ok&&Array.isArray(d.entries)?d.entries:[];
+      }catch(_){return [];}
+    });
   }
 
-  // Salva material em subpasta (.meggy.ai/<kind>/)
   async function saveMaterial(coursePath, pdfName, kind, content){
     try{
       await fetch('/api/materials/save',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({coursePath,pdfName,kind,content})});
+      invalidate('matList:'+kind);
     }catch(_){}
   }
 
-  // Verifica se material já existe (cache hit)
   async function materialExists(coursePath, pdfName, kind){
-    try{
-      const fileName=materialFileName(coursePath, pdfName, kind);
-      const r=await fetch('/api/materials/exists?fileName='+encodeURIComponent(fileName)+'&kind='+kind,{cache:'no-store'});
-      if(!r.ok)return false;
-      const d=await r.json();
-      return !!(d&&d.ok&&d.exists);
-    }catch(_){return false;}
+    const fileName = materialFileName(coursePath, pdfName, kind);
+    return memo('matExists:'+kind+':'+fileName, 60_000, async () => {
+      try{
+        const r=await fetch('/api/materials/exists?fileName='+encodeURIComponent(fileName)+'&kind='+kind);
+        if(!r.ok)return false;
+        const d=await r.json();
+        return !!(d&&d.ok&&d.exists);
+      }catch(_){return false;}
+    });
   }
 
-  // Lista materiais por tipo
   async function listMaterials(kind, courseFilter){
-    try{
-      let url='/api/materials/list?kind='+kind;
-      if(courseFilter)url+='&course='+encodeURIComponent(courseFilter);
-      const r=await fetch(url,{cache:'no-store'});
-      if(!r.ok)return [];
-      const d=await r.json();
-      return d&&d.ok&&Array.isArray(d.items)?d.items:[];
-    }catch(_){return [];}
+    const key = 'matList:'+kind+':'+(courseFilter||'');
+    return memo(key, 30_000, async () => {
+      try{
+        let url='/api/materials/list?kind='+kind;
+        if(courseFilter)url+='&course='+encodeURIComponent(courseFilter);
+        const r=await fetch(url);
+        if(!r.ok)return [];
+        const d=await r.json();
+        return d&&d.ok&&Array.isArray(d.items)?d.items:[];
+      }catch(_){return [];}
+    });
   }
 
-  // Salva curso
   async function saveCourse(coursePath, courseName, pdfCount){
     try{
       await fetch('/api/courses/add',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({coursePath,courseName,pdfCount:pdfCount||0,addedAt:Date.now()})});
+      invalidate('courses');
     }catch(_){}
   }
 
-  // Lista cursos do aluno
   async function listCourses(){
-    try{
-      const r=await fetch('/api/courses/list',{cache:'no-store'});
-      if(!r.ok)return [];
-      const d=await r.json();
-      return d&&d.ok&&Array.isArray(d.courses)?d.courses:[];
-    }catch(_){return [];}
+    return memo('courses', 30_000, async () => {
+      try{
+        const r=await fetch('/api/courses/list');
+        if(!r.ok)return [];
+        const d=await r.json();
+        return d&&d.ok&&Array.isArray(d.courses)?d.courses:[];
+      }catch(_){return [];}
+    });
   }
 
-  // Status do batalhão
   async function battalionStatus(courseKey){
-    try{
-      const r=await fetch('/api/ai/battalion/status?courseKey='+encodeURIComponent(courseKey),{cache:'no-store'});
-      if(!r.ok)return {processed:false};
-      return await r.json();
-    }catch(_){return {processed:false};}
+    return memo('batt:'+courseKey, 15_000, async () => {
+      try{
+        const r=await fetch('/api/ai/battalion/status?courseKey='+encodeURIComponent(courseKey));
+        if(!r.ok)return {processed:false};
+        return await r.json();
+      }catch(_){return {processed:false};}
+    });
   }
 
-  // Dispara batalhão
   async function startBattalion(courseKey, coursePath, lessonName, pdfList){
     try{
       const r=await fetch('/api/ai/battalion',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({courseKey,coursePath,lessonName,pdfs:pdfList||[]})});
       const d=await r.json();
+      invalidate('batt:'+courseKey);
       return !!(d&&d.ok);
     }catch(_){return false;}
   }
 
-  // Salva MD na memória da Meggy
   async function saveMemory(fileName, markdown){
     try{
       await fetch('/api/brain/save',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({fileName,markdown})});
+      invalidate('memory');
     }catch(_){}
   }
 
-  // Lista memória da Meggy
   async function listMemory(filter){
-    try{
-      let url='/api/brain/list';
-      if(filter)url+='?q='+encodeURIComponent(filter);
-      const r=await fetch(url,{cache:'no-store'});
-      if(!r.ok)return [];
-      const d=await r.json();
-      return d&&d.ok&&Array.isArray(d.items)?d.items:[];
-    }catch(_){return [];}
+    const key = 'memory:'+(filter||'');
+    return memo(key, 30_000, async () => {
+      try{
+        let url='/api/brain/list';
+        if(filter)url+='?q='+encodeURIComponent(filter);
+        const r=await fetch(url);
+        if(!r.ok)return [];
+        const d=await r.json();
+        return d&&d.ok&&Array.isArray(d.items)?d.items:[];
+      }catch(_){return [];}
+    });
   }
 
-  // Salva redação corrigida em MD
   async function saveEssay(markdown, banca, tipo, score){
     try{
       await fetch('/api/ai/essay/save',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -179,75 +220,79 @@
     }catch(_){}
   }
 
-  // Salva flashcard compartilhado
   async function saveSharedFlashcard(card){
     try{
       await fetch('/api/ai/shared-flashcards',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(card)});
+      invalidate('sharedFc:'+card.subject);
     }catch(_){}
   }
 
-  // Lista flashcards compartilhados
   async function listSharedFlashcards(subject){
-    try{
-      let url='/api/ai/shared-flashcards';
-      if(subject)url+='?subject='+encodeURIComponent(subject);
-      const r=await fetch(url,{cache:'no-store'});
-      if(!r.ok)return [];
-      const d=await r.json();
-      return d&&d.ok&&Array.isArray(d.items)?d.items:[];
-    }catch(_){return [];}
+    const key = 'sharedFc:'+(subject||'');
+    return memo(key, 60_000, async () => {
+      try{
+        let url='/api/ai/shared-flashcards';
+        if(subject)url+='?subject='+encodeURIComponent(subject);
+        const r=await fetch(url);
+        if(!r.ok)return [];
+        const d=await r.json();
+        return d&&d.ok&&Array.isArray(d.items)?d.items:[];
+      }catch(_){return [];}
+    });
   }
 
-  // ═══ PROGRESS (curso clicável) — scan + user KV + shared Drive ═══
+  // ═══ PROGRESS — scan + user KV + shared Drive ═════
 
-  // Escaneia curso recursivamente, devolve lista de aulas {id,name,path,type}
-  // Roda em background — não bloqueia o usuário
   async function scanCourseProgress(coursePath){
+    // Cache Storage API (sobrevive a reload). Invalidado pelo caller via invalidate().
+    const cacheKey = 'gdi-folder:' + coursePath;
+    const hit = await folderCacheGet(cacheKey);
+    if (hit) return hit;
     try{
       const r=await fetch('/api/courses/scan-progress',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({coursePath})
-      },{cache:'no-store'});
+      });
       if(!r.ok)return null;
       const d=await r.json();
+      if(d&&d.ok) await folderCachePut(cacheKey, d);
       return d&&d.ok?d:null;
     }catch(_){return null;}
   }
 
-  // Salva progresso do usuário no KV (privado por usuário)
-  // progress: [{path, watched:bool, lastPosition?:number}]
   async function saveUserProgress(coursePath, progress, totalLessons){
     try{
       await fetch('/api/courses/user-progress',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({coursePath, progress:progress||[], totalLessons:totalLessons||0})
       });
+      invalidate('userProg:'+coursePath);
     }catch(_){}
   }
 
-  // Lê progresso do usuário no KV
   async function getUserProgress(coursePath){
-    try{
-      const r=await fetch('/api/courses/user-progress?coursePath='+encodeURIComponent(coursePath),{cache:'no-store'});
-      if(!r.ok)return null;
-      const d=await r.json();
-      return d&&d.ok?d.progress:null;
-    }catch(_){return null;}
+    return memo('userProg:'+coursePath, 15_000, async () => {
+      try{
+        const r=await fetch('/api/courses/user-progress?coursePath='+encodeURIComponent(coursePath));
+        if(!r.ok)return null;
+        const d=await r.json();
+        return d&&d.ok?d.progress:null;
+      }catch(_){return null;}
+    });
   }
 
-  // Lê MD compartilhado em .meggy.ai/progress/course-<hash>.md
-  // Se existe: outro usuário já escaneou — só marcar início deste aluno
   async function getSharedProgress(coursePath){
-    try{
-      const r=await fetch('/api/courses/shared-progress?coursePath='+encodeURIComponent(coursePath),{cache:'no-store'});
-      if(!r.ok)return null;
-      const d=await r.json();
-      return d&&d.ok?{markdown:d.markdown, hash:d.hash, fileName:d.fileName, modified:d.modified}:null;
-    }catch(_){return null;}
+    return memo('sharedProg:'+coursePath, 60_000, async () => {
+      try{
+        const r=await fetch('/api/courses/shared-progress?coursePath='+encodeURIComponent(coursePath));
+        if(!r.ok)return null;
+        const d=await r.json();
+        return d&&d.ok?{markdown:d.markdown, hash:d.hash, fileName:d.fileName, modified:d.modified}:null;
+      }catch(_){return null;}
+    });
   }
 
-  // Salva MD compartilhado em .meggy.ai/progress/course-<hash>.md
   async function saveSharedProgress(coursePath, markdown){
     try{
       const r=await fetch('/api/courses/shared-progress',{
@@ -256,12 +301,11 @@
       });
       if(!r.ok)return false;
       const d=await r.json();
+      invalidate('sharedProg:'+coursePath);
       return !!(d&&d.ok);
     }catch(_){return false;}
   }
 
-  // Helper: constrói markdown de progresso compartilhado (formato Meggy brain)
-  // Conteúdo: metadados do curso + lista de aulas + quem já estudou
   function buildSharedProgressMarkdown(opts){
     const {coursePath, courseName, lessons, scannedBy, scannedAt, startedBy} = opts;
     const lines = [];
@@ -294,7 +338,7 @@
     return lines.join('\n');
   }
 
-  // ═══ Expõe API global ═══
+  // ═══ Expõe API global ═════
   window.GDIStorage = {
     version: STORAGE_VERSION,
     // URL helpers
@@ -313,7 +357,7 @@
     // Courses
     saveCourse,
     listCourses,
-    // Course progress (novo)
+    // Course progress
     scanCourseProgress,
     saveUserProgress,
     getUserProgress,
@@ -331,12 +375,12 @@
     // Shared flashcards
     saveSharedFlashcard,
     listSharedFlashcards,
+    // Cache control (novo — não quebra nada)
+    invalidate,           // (keyPrefix?) => void
+    clearCache: () => invalidate(),
+    invalidateFolder: (coursePath) => folderCacheDelete('gdi-folder:' + coursePath),
   };
 
-  // Helper global para navegação com URL curta.
-  // Recebe path longo (ex: /7:/TJ SP/.../video.mp4)
-  // Devolve URL final pronta para location.href (com ?a=view)
-  // Falha silenciosamente para o path longo original em caso de erro.
   window.gdiShortNavigate = async function(target){
     const t = String(target||'');
     if(!t) return t;
@@ -351,5 +395,5 @@
     return t + (t.includes('?')?'&':'?') + 'a=view';
   };
 
-  console.log('[GDI Storage] Drive v1 carregado');
+  console.log('[GDI Storage] Drive v1 carregado (com memoização)');
 })();

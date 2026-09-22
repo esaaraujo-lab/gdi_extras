@@ -1,6 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
 // gdi-meggy.js — M9-ISA (Meggy IA) + M-AI (widget chat)
 // 
+// REFACTORED (Task 4-c):
+//   • PATCH A: page:change handler debounced 1.5s + 30s fallback throttle.
+//   • PATCH B: addQBatch() — batch insert questions (O(N) instead of O(N²)).
+//   • PATCH C: renderHistory() caches parsed HTML per message.
+//   • PATCH D: Resumos migration loop removed (tab removed entirely).
+//   • PATCH E: Flashcards library virtualized (accordion + 50/page pagination).
+//   • PATCH F: window.gdiEnsurePdfjs() — consolidated idempotent pdf.js loader.
+//   • REMOVIDO: aba "Resumos" (user request) — window.renderResumos = no-op stub.
+//   • Public APIs preserved (window.gdiIsaPdf with all 15 methods).
+//
 // Módulo da Meggy 🐩 — poodle tutora de estudos. Inclui:
 //   • M9-ISA: extração de texto de PDF (pdf.js + OCR Tesseract),
 //     geração em cadeia de resumo + pílulas + questões + flashcards,
@@ -14,11 +24,10 @@
 
 // ═══ M9-ISA: EXTRAÇÃO DE PDF + RESUMOS/QUESTÕES COM A ISA ═══
 // Fornece window.gdiIsaPdf (summary/questions) consumido pelo M9
-// (materiais) e window.renderResumos consumido pelo M22 (Central
-// de Estudos, aba "Resumos"). Usa pdf.js para extrair texto do PDF
-// e /api/ai (ISA) para gerar resumo/questões. Sumários são salvos
-// em localStorage 'gdi-isa-summaries-v1'. Questões vão para o banco
-// do M23 ('gdi-questions-v1').
+// (materiais). Usa pdf.js para extrair texto do PDF e /api/ai (ISA)
+// para gerar resumo/questões. Sumários são salvos em localStorage
+// 'gdi-isa-summaries-v1'. Questões vão para o banco do M23
+// ('gdi-questions-v1').
 // ═══════════════════════════════════════════════════════════════
 (function(){
   if(window.__gdiM9Isa)return;window.__gdiM9Isa=true;
@@ -211,6 +220,9 @@
 .gdi-fc-session-foot{flex-shrink:0;display:flex;justify-content:flex-end;padding-top:10px;border-top:1px solid var(--ferreto-border,#21262d);}
 .gdi-fc-skip-btn{width:48px;height:48px;border-radius:50%;border:0;cursor:pointer;background:linear-gradient(135deg,#ff8b9f,#c026d3);color:#fff;font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px -4px rgba(255,139,159,.5);transition:transform .15s;}
 .gdi-fc-skip-btn:hover{transform:scale(1.08);}
+/* ★ PATCH E: botão "Carregar mais" para paginação dentro de temas grandes */
+.gdi-fc-load-more{margin:14px auto 4px;display:flex;align-items:center;gap:6px;padding:10px 18px;background:var(--ferreto-surface-3,rgba(255,255,255,.06));border:1px solid var(--ferreto-border,#30363d);color:var(--ferreto-text,#e6edf3);border-radius:10px;cursor:pointer;font-size:12px;font-family:inherit;transition:background .15s;}
+.gdi-fc-load-more:hover{background:var(--ferreto-surface-3,rgba(255,255,255,.12));}
 
 /* Responsivo */
 @media(max-width:680px){
@@ -224,30 +236,45 @@
     document.head.appendChild(s);
   }
 
-  // ── Dynamic load pdf.js (v3.11.174) ──
-  let pdfjsPromise=null;
-  function ensurePdfjs(){
-    if(window.pdfjsLib){
-      try{if(!window.pdfjsLib.GlobalWorkerOptions.workerSrc)window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';}catch(_){}
-      return Promise.resolve(window.pdfjsLib);
-    }
-    if(pdfjsPromise)return pdfjsPromise;
-    pdfjsPromise=new Promise((resolve,reject)=>{
-      const s=document.createElement('script');
-      s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
-      s.crossOrigin='anonymous';
-      s.onload=()=>{
+  // ═══ PATCH F: Consolidated pdf.js loader (idempotent, sets workerSrc once) ═══
+  // Outros módulos (gdi-study, gdi-core M9, gdi-pdf) podem usar o mesmo loader.
+  if(!window.gdiEnsurePdfjs){
+    window.gdiEnsurePdfjs=function(){
+      if(window._pdfjsPromise)return window._pdfjsPromise;
+      window._pdfjsPromise=new Promise((resolve,reject)=>{
         if(window.pdfjsLib){
-          try{window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';}catch(_){}
-          resolve(window.pdfjsLib);
-        }else{
-          reject(new Error('pdfjsLib não exposto pelo CDN'));
+          if(!window.pdfjsLib._gdiWorkerSrcSet){
+            try{
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+              window.pdfjsLib._gdiWorkerSrcSet=true;
+            }catch(_){}
+          }
+          return resolve(window.pdfjsLib);
         }
-      };
-      s.onerror=()=>reject(new Error('Falha ao carregar pdf.js do CDN'));
-      document.head.appendChild(s);
-    });
-    return pdfjsPromise;
+        const s=document.createElement('script');
+        s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+        s.crossOrigin='anonymous';
+        s.onload=()=>{
+          if(window.pdfjsLib){
+            try{
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+              window.pdfjsLib._gdiWorkerSrcSet=true;
+            }catch(_){}
+            resolve(window.pdfjsLib);
+          }else{
+            reject(new Error('pdfjsLib não exposto pelo CDN'));
+          }
+        };
+        s.onerror=()=>reject(new Error('Falha ao carregar pdf.js do CDN'));
+        document.head.appendChild(s);
+      });
+      return window._pdfjsPromise;
+    };
+  }
+
+  // ── Dynamic load pdf.js (v3.11.174) — agora delega para window.gdiEnsurePdfjs() ──
+  function ensurePdfjs(){
+    return window.gdiEnsurePdfjs();
   }
 
   // ── Dynamic load Tesseract.js (OCR para PDFs escaneados) ──
@@ -393,7 +420,7 @@
       }
 
       txt+=pageText+'\n\n';
-      if(txt.length>25000)break;
+      if(txt.length>50000)break;  // ★ Task 25: 25k→50k chars (resumos mais profundos)
     }
 
     // ★ fallback: tenta extrair de annotations/form fields
@@ -533,8 +560,35 @@
     lsSet(LQ,q);
   }
 
+  // ═══ PATCH B: Inserção em batch de questões (elimina O(N²) no localStorage) ═══
+  // Lê LS 1×, faz push de todos os itens únicos, grava 1×.
+  // Retorna o número de itens efetivamente adicionados (após dedupe por statement).
+  function addQBatch(newItems){
+    if(!newItems||!newItems.length)return 0;
+    const all=lsGet(LQ,[]);
+    const seen=new Set(all.map(x=>x.statement));
+    let added=0;
+    for(const item of newItems){
+      if(!item||!item.statement||seen.has(item.statement))continue;
+      all.push(Object.assign({
+        id:'q'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+        createdAt:Date.now(),
+        hits:0,
+        misses:0
+      },item));
+      seen.add(item.statement);
+      added++;
+    }
+    if(added)lsSet(LQ,all);
+    return added;
+  }
+
   // ── Summaries storage ──
-  // ★ FIX: agora salva também o path do curso e a matéria — para renderResumos agrupar corretamente
+  // ★ FIX: agora salva também o path do curso e a matéria — para o botão
+  // "Resumo" no painel de materiais (M9) agrupar corretamente.
+  // ★ FIX 3 (Task 13): também persiste no Drive via storage.js saveMaterial(),
+  //    na subpasta 'resumos' da pasta do usuário. Assim o resumo sobrevive a
+  //    limpeza do localStorage e fica acessível de outros dispositivos.
   function saveIsaSummary(lesson, summary, coursePath, subject){
     const arr=lsGet(LS_SUM,[]);
     // extrai course e subject do path se não vierem explícitos
@@ -560,6 +614,15 @@
       date:Date.now()
     });
     lsSet(LS_SUM,arr.slice(0,200));
+
+    // ★ FIX 3 (Task 13): também salva no Drive (pasta do usuário / resumos / <hash>.md)
+    // via storage.js. O servidor cria a subpasta 'resumos' on-demand.
+    // Não-await — não bloqueia a UI; falha silenciosa (já temos o localStorage).
+    try{
+      if(window.GDIStorage && typeof window.GDIStorage.saveMaterial==='function' && derivedCourse && summary){
+        window.GDIStorage.saveMaterial(derivedCourse, String(lesson||'Aula').slice(0,200), 'resumos', String(summary)).catch(()=>{});
+      }
+    }catch(_){}
   }
   function listIsaSummaries(){return lsGet(LS_SUM,[]);}
   function delIsaSummary(id){lsSet(LS_SUM,lsGet(LS_SUM,[]).filter(x=>x.id!==id));}
@@ -838,10 +901,34 @@
     return callIsa(prompt);
   }
 
+  // ★ Task 25: classifica tipo de material pelo nome
+  function classifyMaterial(name){
+    const n=(name||'').toLowerCase();
+    // Questões/exercícios/simulados → NÃO usar para resumo, só para questões/flashcards
+    if(/quest|exerc|simulad|prova|caderno|lista|test/.test(n))return 'questions';
+    // Resumos já prontos → pular
+    if(/resum|summary/.test(n))return 'skip';
+    // Material/apostila/aula/teoria → usar para resumo
+    return 'study';
+  }
+
   // Gera TODOS os materiais EM PARALELO TOTAL (não em cascata)
   // Cada tarefa usa uma chave NVIDIA diferente (se houver múltiplas)
   async function generateAll(items,lesson,trigger,progressCb){
     const key=lessonKey();
+    // ★ FIX 3 (Task 13): deriva coursePath e subject da URL atual para passar
+    //    explicitamente ao saveIsaSummary (que agora também persiste no Drive).
+    //    Antes, saveIsaSummary derivava sozinho — mas sempre que generateAll
+    //    era chamado a partir de uma página de aula, a URL já tinha o formato
+    //    /<drive>:/<curso>/<materia>/<aula>, então derivar 1× aqui é mais eficiente
+    //    e garante consistência entre os 2 call-sites (cache hit e geração nova).
+    const _p=window.location.pathname||'';
+    const _seg=_p.split('/').filter(Boolean);
+    let _coursePath='',_subject='';
+    if(_seg.length>=2){
+      _coursePath='/'+_seg.slice(0,2).join('/')+'/';
+      if(_seg.length>=3)_subject=decodeURIComponent(_seg[2]);
+    }
     // se já tem tudo no cache em memória, pula
     if(_chainCache[key]&&_chainCache[key].summary&&_chainCache[key].mindmap&&_chainCache[key].questionsGenerated){
       return _chainCache[key];
@@ -860,7 +947,8 @@
     if(_chainCache[key].summary&&_chainCache[key].mindmap&&cached&&cached.questions&&cached.questions.length){
       _chainCache[key].questionsGenerated=true;
       _chainCache[key].questions=cached.questions;
-      // carrega questões no banco local se ainda não estão
+      // ★ PATCH B: carrega questões no banco local em batch (1 read + 1 write)
+      const _batch=[];
       cached.questions.forEach(q=>{
         if(q&&q.statement){
           let cleanQ;
@@ -869,15 +957,13 @@
           }else if(Array.isArray(q.options)){
             cleanQ={subject:lesson,type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||''),source:'ISA-PDF'};
           }
-          if(cleanQ){
-            const all=lsGet(LQ,[]);
-            if(!all.some(x=>x.statement===cleanQ.statement))addQ(cleanQ);
-          }
+          if(cleanQ)_batch.push(cleanQ);
         }
       });
+      addQBatch(_batch);
       // flashcards do cache
       if(cached.questions.length)autoCreateFlashcards(cached.questions,lesson,lessonKey());
-      saveIsaSummary(lesson,_chainCache[key].summary);
+      saveIsaSummary(lesson,_chainCache[key].summary,_coursePath,_subject);
             return _chainCache[key];
     }
 
@@ -893,17 +979,26 @@
         const txt=await extractPdfText(item.url,(p)=>{
           if(progressCb)progressCb(Object.assign({pdf:item.name},p));
         });
-        return {name:item.name,text:txt};
+        return {name:item.name,text:txt,type:classifyMaterial(item.name)};
       }catch(e){
         throw {name:item.name,error:e.message||String(e),url:item.url};
       }
     }));
+    // ★ Task 25: separa materiais de estudo (apostilas) de questões/simulados
+    const studyTexts=[];   // apostilas/teoria → para resumo
+    const questionTexts=[]; // questões/simulados → para gerar novas questões
     results.forEach(r=>{
       if(r.status==='fulfilled'){
-        const {name,text}=r.value;
+        const {name,text,type}=r.value;
         if(text&&text.trim().length>50){
+          if(type==='skip')return; // pula resumos já prontos
+          if(type==='questions'){
+            questionTexts.push({name,text});
+          }else{
+            studyTexts.push({name,text});
+          }
           allText+=(allText?'\n\n---\n\n':'')+text;
-          pdfTexts.push({name,text});
+          pdfTexts.push({name,text,type});
         }
       }else{
         const err=r.reason||{};
@@ -943,8 +1038,8 @@
     if(!_chainCache[key].summary){
       allTasks.push({
         
-        fn:()=>callIsaKeyed('Leia este material de aula e faça um resumo COMPLETO e estruturado em Markdown. Cubra TODOS os tópicos. Organize em seções com ## títulos, use **negrito** para destaques e listas. Não omita nenhum tema:\n\n'+allText.slice(0,20000),0)
-          .then(r=>{if(r&&r.trim()){_chainCache[key].summary=r;saveIsaSummary(lesson,r);}})
+        fn:()=>callIsaKeyed('Você é um professor especialista em concursos públicos. Leia TODO o material abaixo e crie um RESUMO PROFUNDO E DETALHADO em Markdown.\n\nREQUISITOS:\n- Mínimo 2000 caracteres (NÃO seja breve)\n- Estruture com ## títulos e ### subtítulos\n- Para CADA tópico: explique o conceito, dê EXEMPLOS práticos, e destaque pegadinhas de prova\n- Use **negrito** para palavras-chave e dispositivos legais\n- Use listas com marcadores para enumerações\n- Inclua uma seção ## Pegadinhas de Prova no final\n- Inclua uma seção ## Resumo Rápido com 5-10 bullets dos pontos mais importantes\n\nNÃO omita nenhum tema. Seja PROFUNDO, não conciso.\n\nMaterial:\n'+allText.slice(0,40000),0)
+          .then(r=>{if(r&&r.trim()){_chainCache[key].summary=r;saveIsaSummary(lesson,r,_coursePath,_subject);}})
           .catch(e=>console.warn('[Meggy] resumo falhou',e.message))
       });
     }
@@ -963,25 +1058,32 @@
     if(!_chainCache[key].questionsGenerated){
       _chainCache[key].questionsGenerated=true;
       _chainCache[key]._allCleanQ=[];
-      // extrai questões existentes primeiro (síncrono, rápido)
+      // ★ PATCH B: extrai questões existentes em batch (1 read + 1 write)
+      const _batchExtract=[];
       for(const pdf of pdfTexts){
         const existing=extractQuestionsFromText(pdf.text);
         for(const q of existing){
-          const all=lsGet(LQ,[]);
-          if(!all.some(x=>x.statement===q)){
-            addQ({subject:lesson,type:'open',statement:q,options:[],correct:0,explanation:'Questão extraída do material.',source:'PDF-extract'});
-          }
+          _batchExtract.push({subject:lesson,type:'open',statement:q,options:[],correct:0,explanation:'Questão extraída do material.',source:'PDF-extract'});
         }
       }
+      addQBatch(_batchExtract);
       // uma tarefa por PDF
       pdfTexts.forEach((pdf)=>{
         allTasks.push({
           
-          fn:()=>callIsaKeyed('Você é um examinador de concurso público brasileiro experiente. Baseado neste material, gere 10 questões de concurso em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"legalText":"...","explanation":"...","fundamentacao":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"legalText":"...","explanation":"...","fundamentacao":"..."}\n\nCAMPOS:\n- statement: enunciado claro, contexto completo\n- legalText: o dispositivo legal/dispositivo normativo aplicável (ex: "art. 5º, CF"; "Súmula Vinculante 14"; "Lei 8.906/94, art. 7º")\n- explanation: explicação técnica do acerto/erro (regra violada ou aplicada)\n- fundamentacao: fundamentação didática completa, explicando por que a alternativa correta está correta E por que as outras estão erradas\n\nSem comentários, só JSON.\n\n'+pdf.text.slice(0,15000),0)
+          fn:()=>{
+            // ★ Task 25: usa material de estudo + questões existentes como base
+            const studyForQ=studyTexts.map(s=>s.text).join('\n\n').slice(0,20000);
+            const existingQ=questionTexts.map(q=>q.text).join('\n\n').slice(0,10000);
+            const baseText=studyForQ||(pdf.text||'').slice(0,15000);
+            const extraContext=existingQ?('\n\n--- QUESTÕES EXISTENTES NO MATERIAL (use como inspiração):\n'+existingQ):'';
+            return callIsaKeyed('Você é um examinador de concurso público brasileiro experiente. Baseado neste material de estudo, gere 10 questões INÉDITAS de concurso em JSON array. Misture:\n- 6 múltipla escolha: {"type":"mc","statement":"...","options":["a","b","c","d"],"correct":0,"legalText":"...","explanation":"...","fundamentacao":"..."}\n- 4 certo/errado (CEBRASPE): {"type":"tf","statement":"...","correct":1,"legalText":"...","explanation":"...","fundamentacao":"..."}\n\nCAMPOS:\n- statement: enunciado claro, contexto completo\n- legalText: o dispositivo legal/dispositivo normativo aplicável\n- explanation: explicação técnica do acerto/erro\n- fundamentacao: fundamentação didática completa\n\nSem comentários, só JSON array válido.\n\n'+baseText+extraContext,0)
             .then(resp=>{
               if(!resp)return;
               try{
                 const arr=parseJsonArray(resp);
+                // ★ PATCH B: inserir questões em batch (1 read + 1 write)
+                const _batchAI=[];
                 arr.forEach(q=>{
                   if(!q||!q.statement)return;
                   let cleanQ;
@@ -991,16 +1093,15 @@
                     cleanQ={type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||''),legalText:String(q.legalText||q.fundamentacao||''),fundamentacao:String(q.fundamentacao||'')};
                   }
                   if(cleanQ){
-                    const all=lsGet(LQ,[]);
-                    if(!all.some(x=>x.statement===cleanQ.statement)){
-                      addQ({subject:lesson,...cleanQ,source:'ISA-PDF'});
-                      _chainCache[key]._allCleanQ.push(cleanQ);
-                    }
+                    _batchAI.push(Object.assign({subject:lesson,source:'ISA-PDF'},cleanQ));
+                    _chainCache[key]._allCleanQ.push(cleanQ);
                   }
                 });
+                addQBatch(_batchAI);
               }catch(e){console.warn('[Meggy] parse questões falhou',e.message);}
             })
             .catch(e=>console.warn('[Meggy] questões falharam',e.message))
+          }
         });
       });
     }
@@ -1089,9 +1190,10 @@
         else if(p.phase==='ocr-done')setLoading(bodyEl,'OCR concluído ('+p.chars+' caracteres). Gerando questões…');
       });
     }catch(e){setError(bodyEl,e.message);return;}
-    // carrega questões do cache se existirem
+    // carrega questões do cache se existirem (★ PATCH B: batch insert)
     const cached=await cacheGet();
     if(cached&&cached.questions&&Array.isArray(cached.questions)&&cached.questions.length){
+      const _batch=[];
       cached.questions.forEach(q=>{
         if(q&&q.statement){
           let cleanQ;
@@ -1100,12 +1202,10 @@
           }else if(Array.isArray(q.options)){
             cleanQ={subject:lesson,type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||''),source:'ISA-PDF'};
           }
-          if(cleanQ){
-            const all=lsGet(LQ,[]);
-            if(!all.some(x=>x.statement===cleanQ.statement))addQ(cleanQ);
-          }
+          if(cleanQ)_batch.push(cleanQ);
         }
       });
+      addQBatch(_batch);
     }
     startQuizFromBank(bodyEl,lesson);
   }
@@ -1139,6 +1239,8 @@
     }catch(e){setError(bodyEl,'Meggy indisponível: '+e.message);return false;}
     let arr;
     try{arr=parseJsonArray(resp);}catch(e){setError(bodyEl,'Meggy retornou formato inválido: '+e.message);return false;}
+    // ★ PATCH B: batch insert (1 read + 1 write)
+    const _batchGen=[];
     const cleanArr=[];
     arr.forEach(q=>{
       if(!q||!q.statement)return;
@@ -1149,13 +1251,11 @@
         cleanQ={subject:lesson,type:'mc',statement:String(q.statement),options:q.options.map(String),correct:Math.max(0,Math.min(3,Number(q.correct)||0)),explanation:String(q.explanation||''),source:'ISA-PDF'};
       }
       if(cleanQ){
-        const all=lsGet(LQ,[]);
-        if(!all.some(x=>x.statement===cleanQ.statement)){
-          addQ(cleanQ);
-          cleanArr.push({type:cleanQ.type,statement:cleanQ.statement,options:cleanQ.options,correct:cleanQ.correct,explanation:cleanQ.explanation});
-        }
+        _batchGen.push(cleanQ);
+        cleanArr.push({type:cleanQ.type,statement:cleanQ.statement,options:cleanQ.options,correct:cleanQ.correct,explanation:cleanQ.explanation});
       }
     });
+    addQBatch(_batchGen);
     if(cleanArr.length){
       const existing=await cacheGet();
       const merged=[...((existing&&existing.questions)||[]),...cleanArr];
@@ -1334,10 +1434,10 @@
   }
 
   // ── Flashcards flow (aba no M9 — BIBLIOTECA organizada por disciplina → tema) ──
-  // ★FIX v3: agora mostra TODOS os flashcards (não só da aula atual),
-  // agrupados por disciplina (pasta pai) → tema (aula). Cada card é um
-  // flip card 3D de verdade (frente/verso). Botão "Gerar com Meggy"
-  // dispara a cadeia de geração quando a biblioteca está vazia.
+  // ★ REFACTORED (PATCH E): virtualização por accordion. Todos os temas
+  // começam colapsados. Clicar no header do tema → renderiza só os cards
+  // daquele tema (com paginação 50/page se >50). Clicar de novo → colapsa
+  // e limpa innerHTML (libera memória). Disciplinas também são colapsáveis.
   async function flashcards(items, bodyEl, lessonName){
     const lesson = realLessonName(lessonName || (items[0] && items[0].name) || 'Aula');
     const urlPath = lessonKey();
@@ -1459,7 +1559,8 @@
 
     const discWrap = bodyEl.querySelector('.gdi-fc-disciplines');
 
-    // ── Render disciplines → themes → cards ──
+    // ═══ PATCH E: Render disciplines → themes HEADERS ONLY (collapsed, no card HTML) ═══
+    // Os cards só são renderizados quando o tema é expandido (lazy).
     disciplines.forEach((disc, di)=>{
       const themes = grouped[disc];
       const themeKeys = Object.keys(themes).sort((a,b)=>a.localeCompare(b,'pt-BR'));
@@ -1470,13 +1571,15 @@
       discEl.className = 'gdi-fc-discipline';
       discEl.innerHTML = `
         <div class="gdi-fc-disc-head" data-disc-idx="${di}">
-          <i class="bi bi-chevron-down gdi-fc-chevron"></i>
+          <i class="bi bi-chevron-down gdi-fc-chevron gdi-fc-rotated"></i>
           <i class="bi bi-folder-fill gdi-fc-disc-icon"></i>
           <b class="gdi-fc-disc-name">${esc(disc)}</b>
           <span class="gdi-fc-disc-meta">${discCount} cards · ${themeKeys.length} tema${themeKeys.length>1?'s':''}${discDue?` · <b class="gdi-fc-due">${discDue} p/ revisar</b>`:''}</span>
         </div>
-        <div class="gdi-fc-disc-body">`;
+        <div class="gdi-fc-disc-body" style="display:none;"></div>`;
 
+      // renderiza apenas os HEADERS de cada tema (corpo vazio, preenchido sob demanda)
+      const discBody = discEl.querySelector('.gdi-fc-disc-body');
       themeKeys.forEach((theme, ti)=>{
         const cardsT = themes[theme];
         const dueT = cardsT.filter(c=>(c.due||0)<=Date.now()).length;
@@ -1484,7 +1587,7 @@
         themeEl.className = 'gdi-fc-theme';
         themeEl.innerHTML = `
           <div class="gdi-fc-theme-head" data-disc-idx="${di}" data-theme-idx="${ti}">
-            <i class="bi bi-chevron-down gdi-fc-chevron"></i>
+            <i class="bi bi-chevron-down gdi-fc-chevron gdi-fc-rotated"></i>
             <i class="bi bi-bookmark-fill gdi-fc-theme-icon"></i>
             <b class="gdi-fc-theme-name">${esc(theme)}</b>
             <span class="gdi-fc-theme-meta">${cardsT.length} cards${dueT?` · <b class="gdi-fc-due">${dueT} p/ revisar</b>`:''}</span>
@@ -1492,37 +1595,14 @@
               <i class="bi bi-play-fill"></i>
             </button>
           </div>
-          <div class="gdi-fc-theme-body">
-            <div class="gdi-fc-grid">
-              ${cardsT.map(c=>`
-                <div class="gdi-fc-card" data-card-id="${esc(c.id)}">
-                  <div class="gdi-fc-card-inner">
-                    <div class="gdi-fc-card-face gdi-fc-card-front">
-                      <div class="gdi-fc-card-label"><i class="bi bi-question-circle"></i> PERGUNTA</div>
-                      <div class="gdi-fc-card-text">${esc(String(c.f).slice(0,300))}</div>
-                      <div class="gdi-fc-card-hint"><i class="bi bi-arrow-repeat"></i> clique para virar</div>
-                    </div>
-                    <div class="gdi-fc-card-face gdi-fc-card-back">
-                      <div class="gdi-fc-card-label"><i class="bi bi-check-circle"></i> RESPOSTA</div>
-                      <div class="gdi-fc-card-text">${esc(String(c.b).slice(0,400))}</div>
-                      <div class="gdi-fc-card-hint"><i class="bi bi-arrow-repeat"></i> clique para voltar</div>
-                    </div>
-                  </div>
-                  <button class="gdi-fc-card-del" data-card-id="${esc(c.id)}" title="Excluir">
-                    <i class="bi bi-x-lg"></i>
-                  </button>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>`;
-        discEl.querySelector('.gdi-fc-disc-body').appendChild(themeEl);
+          <div class="gdi-fc-theme-body" style="display:none;"></div>`;
+        discBody.appendChild(themeEl);
       });
 
       discWrap.appendChild(discEl);
     });
 
-    // ── Discipline collapse/expand ──
+    // ═══ PATCH E: Discipline expand/collapse (themes dentro já são collapsed) ═══
     discWrap.querySelectorAll('.gdi-fc-disc-head').forEach(h=>{
       h.onclick = (e)=>{
         e.stopPropagation();
@@ -1539,7 +1619,7 @@
       };
     });
 
-    // ── Theme collapse/expand ──
+    // ═══ PATCH E: Theme expand/collapse — LAZY render + free memory on collapse ═══
     discWrap.querySelectorAll('.gdi-fc-theme-head').forEach(h=>{
       h.onclick = (e)=>{
         if(e.target.closest('.gdi-fc-theme-study')) return;
@@ -1548,37 +1628,29 @@
         const chevron = h.querySelector('.gdi-fc-chevron');
         const isOpen = body.style.display !== 'none';
         if(isOpen){
+          // colapsa + libera memória (limpa innerHTML)
           body.style.display = 'none';
+          body.innerHTML = '';
+          body.dataset.rendered = '';
           chevron.classList.add('gdi-fc-rotated');
         }else{
           body.style.display = 'block';
           chevron.classList.remove('gdi-fc-rotated');
+          // lazy render: só monta os cards na primeira abertura
+          if(body.dataset.rendered !== '1'){
+            const di = +h.dataset.discIdx;
+            const ti = +h.dataset.themeIdx;
+            const disc = disciplines[di];
+            const theme = Object.keys(grouped[disc]).sort((a,b)=>a.localeCompare(b,'pt-BR'))[ti];
+            const cardsT = grouped[disc][theme];
+            renderThemeCardsPaginated(body, cardsT, items, bodyEl, lessonName);
+            body.dataset.rendered = '1';
+          }
         }
       };
     });
 
-    // ── Card flip ──
-    discWrap.querySelectorAll('.gdi-fc-card').forEach(card=>{
-      card.onclick = (e)=>{
-        if(e.target.closest('.gdi-fc-card-del')) return;
-        e.stopPropagation();
-        card.classList.toggle('gdi-fc-flipped');
-      };
-    });
-
-    // ── Card delete ──
-    discWrap.querySelectorAll('.gdi-fc-card-del').forEach(btn=>{
-      btn.onclick = (e)=>{
-        e.stopPropagation();
-        const id = btn.dataset.cardId;
-        const cards = lsGet('gdi-cards-v1', []);
-        lsSet('gdi-cards-v1', cards.filter(x=>x.id !== id));
-        showToast('Flashcard excluído');
-        flashcards(items, bodyEl, lessonName);
-      };
-    });
-
-    // ── Theme study ──
+    // ── Theme study (botão play) ──
     discWrap.querySelectorAll('.gdi-fc-theme-study').forEach(btn=>{
       btn.onclick = (e)=>{
         e.stopPropagation();
@@ -1681,6 +1753,77 @@
     // ★ Enter no campo "verso" salva e adiciona próximo
     const addB=bodyEl.querySelector('#gdi-fc-add-b');
     if(addB)addB.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();saveNewCard(true);}});
+  }
+
+  // ═══ PATCH E: Renderizador paginado de cards de um tema ═══
+  // Renderiza até PAGE_SIZE cards por vez. Se o tema tem mais, mostra botão
+  // "Carregar mais". Re-vincula flip/delete a cada página.
+  function renderThemeCardsPaginated(body, cards, items, bodyEl, lessonName){
+    const PAGE_SIZE = 50;
+    let visible = Math.min(PAGE_SIZE, cards.length);
+
+    function renderPage(){
+      const slice = cards.slice(0, visible);
+      body.innerHTML = `
+        <div class="gdi-fc-grid">
+          ${slice.map(c=>`
+            <div class="gdi-fc-card" data-card-id="${esc(c.id)}">
+              <div class="gdi-fc-card-inner">
+                <div class="gdi-fc-card-face gdi-fc-card-front">
+                  <div class="gdi-fc-card-label"><i class="bi bi-question-circle"></i> PERGUNTA</div>
+                  <div class="gdi-fc-card-text">${esc(String(c.f).slice(0,300))}</div>
+                  <div class="gdi-fc-card-hint"><i class="bi bi-arrow-repeat"></i> clique para virar</div>
+                </div>
+                <div class="gdi-fc-card-face gdi-fc-card-back">
+                  <div class="gdi-fc-card-label"><i class="bi bi-check-circle"></i> RESPOSTA</div>
+                  <div class="gdi-fc-card-text">${esc(String(c.b).slice(0,400))}</div>
+                  <div class="gdi-fc-card-hint"><i class="bi bi-arrow-repeat"></i> clique para voltar</div>
+                </div>
+              </div>
+              <button class="gdi-fc-card-del" data-card-id="${esc(c.id)}" title="Excluir">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+        ${cards.length > visible ? `
+          <div style="text-align:center;">
+            <button class="gdi-fc-load-more" type="button">
+              <i class="bi bi-three-dots"></i> Carregar mais (${cards.length - visible} restantes)
+            </button>
+          </div>
+        ` : ''}`;
+
+      // re-vincula flip
+      body.querySelectorAll('.gdi-fc-card').forEach(card=>{
+        card.onclick = (e)=>{
+          if(e.target.closest('.gdi-fc-card-del')) return;
+          e.stopPropagation();
+          card.classList.toggle('gdi-fc-flipped');
+        };
+      });
+      // re-vincula delete
+      body.querySelectorAll('.gdi-fc-card-del').forEach(btn=>{
+        btn.onclick = (e)=>{
+          e.stopPropagation();
+          const id = btn.dataset.cardId;
+          const cards2 = lsGet('gdi-cards-v1', []);
+          lsSet('gdi-cards-v1', cards2.filter(x=>x.id !== id));
+          showToast('Flashcard excluído');
+          flashcards(items, bodyEl, lessonName);
+        };
+      });
+      // botão carregar mais
+      const moreBtn = body.querySelector('.gdi-fc-load-more');
+      if(moreBtn){
+        moreBtn.onclick = (e)=>{
+          e.stopPropagation();
+          visible = Math.min(visible + PAGE_SIZE, cards.length);
+          renderPage();
+        };
+      }
+    }
+    renderPage();
   }
 
   // ── Sessão de estudo de flashcards (vira o card) ──
@@ -1913,10 +2056,6 @@
     }catch(_){return {ok:false,processed:false};}
   }
 
-  // ── Public API ──
-  window.gdiIsaPdf={summary,questions,mindmap,flashcards,regenerate,extractPdfText,saveIsaSummary,listIsaSummaries,delIsaSummary,fetchSharedQuestions,fetchSharedSummaries,saveSharedSummary,saveEssayMD,startBattalion,getBattalionStatus};
-
-  // ── Render: Resumos (M22 new tab) ──
   // ── Salvar resumo no pool compartilhado (todos os usuários) ──
   async function saveSharedSummary(lessonName,summary,questions){
     try{
@@ -1934,149 +2073,244 @@
     }catch(_){return [];}
   }
 
-  window.renderResumos=function(box){
-    const all=listIsaSummaries();
-    // ★ MIGRAÇÃO: para resumos antigos sem .path, tenta derivar do .lesson
-    // Ex: lesson "Sou + Carreiras Policiais 5.0 - 01 - Aula" → path default '/0:/Sou + Carreiras Policiais 5.0/'
-    for(const r of all){
-      if(!r.path){
-        // tenta extrair curso do lesson (antes do ' - ')
-        const lessonStr=r.lesson||'';
-        const dashIdx=lessonStr.indexOf(' - ');
-        if(dashIdx>0){
-          const courseName=lessonStr.slice(0, dashIdx).trim();
-          r.path='/0:/'+courseName+'/';
-          r.subject=r.subject||'Geral';
-        }
-      }
-      // se ainda não tem path, marca como órfão
-      if(!r.path)r.path='__sem_curso__';
-      if(!r.subject)r.subject='Geral';
-    }
-    // ★ agrupar por curso (path do aluno), trilha e matéria
-    const trails=(window.gdiTrails&&window.gdiTrails.get())||[];
-    const subjects=(window.gdiSubjects&&window.gdiSubjects.get())||[];
-    // tenta derivar curso do resumo (lesson = nome da aula → pega 1º segmento do path)
-    function courseOf(r){
-      const p=r.path||r.lessonKey||'';
-      if(p&&p!=='__sem_curso__'){
-        const seg=p.split('/').filter(Boolean);
-        if(seg.length>=2){
-          // /7:/Curso/Materia → retorna "/7:/Curso" (sem trailing slash)
-          return '/'+seg.slice(0,2).join('/');
-        }
-        if(seg.length===1)return seg[0];
-      }
-      // fallback: tenta extrair do lesson
-      const lessonStr=r.lesson||'';
-      const dashIdx=lessonStr.indexOf(' - ');
-      if(dashIdx>0)return lessonStr.slice(0, dashIdx).trim();
-      return 'Sem curso';
-    }
-    function subjectOf(r){
-      if(r.subject&&r.subject!=='Geral')return r.subject;
-      // tenta extrair do lesson
-      const lessonStr=r.lesson||'';
-      const dashIdx=lessonStr.indexOf(' - ');
-      if(dashIdx>0){
-        const after=lessonStr.slice(dashIdx+3);
-        // se após o ' - ' houver outro ' - ', pega o primeiro segmento
-        const dash2=after.indexOf(' - ');
-        if(dash2>0)return after.slice(0,dash2).trim();
-        return after.trim();
-      }
-      return 'Geral';
-    }
-    const byCourse={};
-    all.forEach(r=>{
-      const c=courseOf(r);
-      if(!byCourse[c])byCourse[c]={items:[],subject:{} };
-      byCourse[c].items.push(r);
-      const s=subjectOf(r);
-      if(!byCourse[c].subject[s])byCourse[c].subject[s]=[];
-      byCourse[c].subject[s].push(r);
-    });
-    // ★ Tiles por curso (igual ao Meus Cursos), retangulares
-    const tilesHtml=Object.entries(byCourse).map(([course,info])=>{
-      const subs=Object.keys(info.subject).length;
-      const totalChars=info.items.reduce((s,r)=>s+(r.summary||'').length,0);
-      return `<div class="gdi-course" data-course="${esc(course)}" style="cursor:pointer;display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-left:4px solid var(--ferreto-primary,#ff8b9f);">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <b style="color:var(--ferreto-text,#f0f6fc);font-size:13px;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(course)}</b>
-          <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;background:var(--ferreto-surface-3,rgba(255,255,255,.08));padding:2px 8px;border-radius:8px;">${info.items.length}</span>
-        </div>
-        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;">${subs} matéria(s) · ${Math.round(totalChars/1000)}k chars</div>
-      </div>`;
-    }).join('');
-    box.innerHTML=`
-      <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;">
-        <div style="font-size:32px;flex:none;">📚</div>
-        <div style="flex:1;min-width:240px;">
-          <h3 style="color:var(--ferreto-text,#f0f6fc);margin:0 0 4px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:18px;">Resumos da Meggy</h3>
-          <p style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;margin:0;line-height:1.5;">${all.length} resumo${all.length===1?'':'s'} gerado${all.length===1?'':'s'} pela Meggy 🐩, organizados por curso, trilha e matéria. Clique para expandir.</p>
-        </div>
+  // ── Public API ── (E — todos os 16 métodos preservados)
+  // ★ FIX 6 (Task 21): added downloadAsPdf to exports. It was defined as a local
+  // function but never exported, yet renderResumos references window.gdiIsaPdf.downloadAsPdf
+  // (line 2137). The check `if (... && window.gdiIsaPdf.downloadAsPdf)` silently failed,
+  // so the "PDF" button on saved resumos did nothing. Now exported.
+  window.gdiIsaPdf={summary,questions,mindmap,flashcards,regenerate,extractPdfText,saveIsaSummary,listIsaSummaries,delIsaSummary,downloadAsPdf,fetchSharedQuestions,fetchSharedSummaries,saveSharedSummary,saveEssayMD,startBattalion,getBattalionStatus};
+
+  // ═══ REATIVADO: aba "Resumos" na Central de Estudos (Task 13 — FIX 2) ═══
+  // Antes era um stub no-op (window.renderResumos=function(){};). Agora é uma
+  // implementação real que lista os resumos salvos em localStorage (via
+  // gdiIsaPdf.listIsaSummaries()), agrupados por matéria, com botões
+  // Ver / Baixar PDF / Deletar. Conecta o orphan function: o botão "Resumo"
+  // no painel de materiais M9 chama saveIsaSummary() → a aba "Resumos"
+  // lista o que foi salvo. Antes estavam desconectados.
+  function _summaryModal(lesson, markdownText){
+    // modal próprio (não depende de gdiModal que escapa o conteúdo)
+    document.querySelectorAll('.gdi-resumo-modal').forEach(m=>m.remove());
+    const overlay=document.createElement('div');
+    overlay.className='gdi-resumo-modal';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(4px);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px;animation:gdi-modal-fade .2s ease;';
+    const html=renderMd(markdownText);
+    overlay.innerHTML=`<div style="background:var(--ferreto-bg-2,#0d1119);border:1px solid var(--ferreto-border,#21262d);border-radius:14px;max-width:780px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--ferreto-border,#21262d);gap:10px;">
+        <b style="color:var(--ferreto-text,#f0f6fc);font-size:15px;font-family:var(--ferreto-font-display,'Poppins',sans-serif);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">${esc(lesson)}</b>
+        <button class="gdi-resumo-x" style="background:transparent;border:0;color:var(--ferreto-text-muted,#8b949e);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;flex:none;">✕</button>
       </div>
-      ${!all.length?'<div class="gdi-notes-empty" style="padding:40px 20px;text-align:center;"><i class="bi bi-file-earmark-text" style="font-size:36px;display:block;margin-bottom:10px;color:var(--ferreto-text-faint,#6b7488);"></i>Nenhum resumo ainda.<br><span style="font-size:12px;color:var(--ferreto-text-muted,#8b949e);">Abra uma aula com PDF e clique em "Resumo Meggy" na barra de materiais.</span></div>':`<h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Meus resumos (${all.length})</h4>`}
-      <div class="gdi-courses" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:24px;">${tilesHtml}</div>
-      <div id="gdi-rs-list" style="display:none;flex-direction:column;gap:8px;"></div>
-      <div id="gdi-rs-shared-section" style="margin-top:24px;">
-        <h4 style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;"><i class="bi bi-people"></i> Resumos compartilhados por outros alunos (mesma matéria)</h4>
-        <div id="gdi-rs-shared" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
-          <div class="gdi-notes-empty" style="color:var(--ferreto-text-faint,#6b7488);grid-column:1/-1;">Carregando…</div>
-        </div>
-      </div>`;
-    // ★ Tiles clicáveis → lista filtrada
-    const list=box.querySelector('#gdi-rs-list');
-    box.querySelectorAll('[data-course]').forEach(tile=>{
-      tile.onclick=()=>{
-        const course=tile.dataset.course;
-        const items=byCourse[course]?byCourse[course].items:[];
-        box.querySelectorAll('[data-course]').forEach(t=>t.style.outline='');
-        tile.style.outline='2px solid var(--ferreto-primary,#ff8b9f)';
-        list.style.display='flex';
-        list.innerHTML='';
-        items.forEach(r=>{
-          const row=document.createElement('div');row.className='gdi-note';
-          row.style.flexDirection='column';row.style.alignItems='stretch';
-          const dt=new Date(r.date).toLocaleString('pt-BR',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-          row.innerHTML=`<div class="gdi-rs-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%;cursor:pointer;">
-            <span style="flex:1;min-width:0;">
-              <b style="color:var(--ferreto-text,#f0f6fc);"><i class="bi bi-stars" style="color:var(--ferreto-primary,#ff8b9f);"></i> ${esc(r.lesson)}</b>
-              <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-left:6px;">· ${dt} · ${subjectOf(r)}</span>
-            </span>
-            <button class="gdi-note-del" title="Excluir" style="flex:none;"><i class="bi bi-x-lg"></i></button>
-          </div>
-          <div class="gdi-rs-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
-          const body=row.querySelector('.gdi-rs-body');
-          const head=row.querySelector('.gdi-rs-head');
-          head.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
-          row.querySelector('button').onclick=(e)=>{e.stopPropagation();delIsaSummary(r.id);window.renderResumos(box);showToast('Resumo excluído');};
-          list.appendChild(row);
-        });
-        list.scrollIntoView({behavior:'smooth',block:'nearest'});
-      };
+      <div class="gdi-resumo-content" style="padding:20px;overflow-y:auto;color:var(--ferreto-text,#e6edf3);font-size:14px;line-height:1.65;">${html}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 18px;border-top:1px solid var(--ferreto-border,#21262d);flex-wrap:wrap;">
+        <button class="gdi-resumo-pdf gdi-mode-btn" style="font-size:13px;"><i class="bi bi-download"></i> Baixar PDF</button>
+        <button class="gdi-resumo-close gdi-mode-btn" style="font-size:13px;">Fechar</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    if(!document.getElementById('gdi-resumo-modal-style')){
+      const st=document.createElement('style');st.id='gdi-resumo-modal-style';
+      st.textContent='.gdi-resumo-modal .gdi-resumo-content h1,.gdi-resumo-modal .gdi-resumo-content h2,.gdi-resumo-modal .gdi-resumo-content h3{color:var(--ferreto-text,#f0f6fc);margin-top:18px;}.gdi-resumo-modal .gdi-resumo-content h1{font-size:20px;}.gdi-resumo-modal .gdi-resumo-content h2{font-size:17px;border-left:3px solid #ff8b9f;padding-left:10px;}.gdi-resumo-modal .gdi-resumo-content h3{font-size:14px;}.gdi-resumo-modal .gdi-resumo-content code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:3px;font-family:Courier New,monospace;font-size:12px;}.gdi-resumo-modal .gdi-resumo-content pre{background:rgba(255,255,255,.06);padding:12px;border-radius:6px;overflow-x:auto;}.gdi-resumo-modal .gdi-resumo-content blockquote{border-left:3px solid #ff8b9f;margin:10px 0;padding:4px 14px;color:var(--ferreto-text-muted,#9aa4b8);font-style:italic;}.gdi-resumo-modal .gdi-resumo-content a{color:#5ddeda;}';
+      document.head.appendChild(st);
+    }
+    const close=()=>overlay.remove();
+    overlay.querySelector('.gdi-resumo-x').onclick=close;
+    overlay.querySelector('.gdi-resumo-close').onclick=close;
+    overlay.querySelector('.gdi-resumo-pdf').onclick=()=>downloadAsPdf(lesson,markdownText);
+    overlay.onclick=(e)=>{if(e.target===overlay)close();};
+    const escHandler=(e)=>{if(e.key==='Escape'){close();document.removeEventListener('keydown',escHandler);}};
+    document.addEventListener('keydown',escHandler);
+  }
+
+  // ★ FIX 4 (Task 23): renderResumos agora é ASYNC e lê resumos de DUAS fontes:
+  //   1) localStorage (listIsaSummaries) — rápido, offline-first
+  //   2) Google Drive (.meggy.ai/resumos/) via GDIStorage.listMaterials
+  // Antes só lia localStorage — então resumos gerados pelo batalhão em outro
+  // dispositivo (ou após limpar localStorage) não apareciam. Agora mergeia os
+  // dois, dedup por lesson+date, e mostra um badge "Drive" nos itens que só
+  // existem no Drive. O conteúdo dos itens do Drive é lazy-loaded (fetch do
+  // downloadUrl) apenas quando o aluno clica em "Ver" ou "PDF" — não baixa
+  // todos os resumos de uma vez (seria pesado).
+  window.renderResumos = async function(bodyEl){
+    if(!bodyEl)return;
+    // Loading state imediato (a chamada ao Drive pode levar 1-2s)
+    bodyEl.innerHTML='<div class="gdi-empty-state" style="padding:40px 20px;"><div class="gdi-spinner" style="margin:0 auto 12px;width:32px;height:32px;border:3px solid var(--ferreto-surface-3,rgba(255,255,255,.08));border-top-color:var(--ferreto-primary,#ff8b9f);border-radius:50%;animation:gdi-scan-spin 1s linear infinite;"></div><p style="color:var(--ferreto-text-muted,#8b949e);font-size:13px;margin:0;">Carregando resumos…</p></div>';
+
+    // 1) localStorage resumos (rápido, síncrono)
+    const localSummaries = window.gdiIsaPdf ? window.gdiIsaPdf.listIsaSummaries() : [];
+
+    // 2) Drive resumos (.meggy.ai/resumos/) — best-effort, não bloqueia
+    let driveSummaries = [];
+    try{
+      if(window.GDIStorage && typeof window.GDIStorage.listMaterials==='function'){
+        const items = await window.GDIStorage.listMaterials('resumos', '');
+        if(Array.isArray(items)){
+          driveSummaries = items
+            .filter(it => it && it.id && it.name)
+            .map(it => {
+              // Nome do arquivo no Drive: <safeLesson>_<safePdf>_<timestamp>.md
+              // safeLesson/safePdf substituíram [^a-zA-Z0-9_-] por _. Reconstrói
+              // um nome legível trocando _ por espaço e removendo .md.
+              let displayName = String(it.name||'').replace(/\.md$/i,'').replace(/\.json$/i,'');
+              // Heurística: remove o sufixo de timestamp (digits no final)
+              displayName = displayName.replace(/_\d{10,}$/, '').replace(/_/g, ' ').trim();
+              if(displayName.length>200)displayName=displayName.slice(0,200);
+              return {
+                id: 'drive-'+it.id,
+                lesson: displayName || 'Resumo do Drive',
+                summary: '',  // lazy-loaded on click
+                path: '',
+                subject: 'Drive',
+                date: it.modified ? new Date(it.modified).getTime() : (it.id?0:Date.now()),
+                _drive: true,
+                _downloadUrl: it.downloadUrl,
+                _fileId: it.id
+              };
+            });
+        }
+      }
+    }catch(_){ /* Drive indisponível — segue só com localStorage */ }
+
+    // 3) Merge: localStorage primeiro (tem prioridade — conteúdo já carregado),
+    //    depois Drive (dedup por lesson name case-insensitive)
+    const seenLesson = new Set();
+    const all = [];
+    for(const r of localSummaries){
+      if(!r)continue;
+      const k = String(r.lesson||'').toLowerCase();
+      if(!seenLesson.has(k)){
+        seenLesson.add(k);
+        all.push(r);
+      }
+    }
+    for(const r of driveSummaries){
+      if(!r)continue;
+      const k = String(r.lesson||'').toLowerCase();
+      if(!seenLesson.has(k)){
+        seenLesson.add(k);
+        all.push(r);
+      }
+    }
+
+    // 4) Sort por data decrescente
+    all.sort((a,b)=>(b.date||0)-(a.date||0));
+
+    if(!all.length){
+      bodyEl.innerHTML='<div class="gdi-empty-state"><span class="gdi-empty-state-icon">📋</span><h3>Nenhum resumo ainda</h3><p>Gere resumos assistindo às aulas e clicando no botão "Resumo" no painel de materiais.</p></div>';
+      return;
+    }
+
+    // 5) Agrupa por matéria (subject)
+    const bySubject = {};
+    all.forEach(r=>{
+      const s = r.subject || 'Geral';
+      if(!bySubject[s])bySubject[s]=[];
+      bySubject[s].push(r);
     });
-    // carrega resumos compartilhados (em tiles também)
-    const sharedEl=box.querySelector('#gdi-rs-shared');
-    fetchSharedSummaries().then(shared=>{
-      if(!shared.length){sharedEl.innerHTML='<div class="gdi-notes-empty" style="grid-column:1/-1;">Nenhum resumo compartilhado ainda.</div>';return;}
-      sharedEl.innerHTML='';
-      shared.slice().reverse().forEach(r=>{
-        const dt=new Date(r.date||0).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'});
-        const tile=document.createElement('div');tile.className='gdi-course';tile.style.cursor='pointer';tile.style.padding='12px 14px';
-        tile.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <b style="color:var(--ferreto-secondary,#5ddeda);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="bi bi-people" style="font-size:11px;"></i> ${esc(r.lessonName||'Aula')}</b>
-        </div>
-        <div style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;margin-top:4px;">por ${esc(r.author||'aluno')} · ${dt}</div>
-        <div class="gdi-rs-shared-body" style="display:none;color:var(--ferreto-text,#e6edf3);font-size:13px;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid var(--ferreto-border,#21262d);overflow-x:auto;"></div>`;
-        const body=tile.querySelector('.gdi-rs-shared-body');
-        tile.onclick=()=>{const open=body.style.display!=='none';body.style.display=open?'none':'block';if(!open&&body.dataset.rendered!=='1'){body.innerHTML=renderMd(r.summary);body.dataset.rendered='1';}};
-        sharedEl.appendChild(tile);
+    let html='<div class="gdi-resumos-list" style="display:flex;flex-direction:column;gap:18px;">';
+    for(const subject in bySubject){
+      html+=`<div class="gdi-resumos-group"><h3 style="color:var(--ferreto-text,#f0f6fc);font-family:var(--ferreto-font-display,'Poppins',sans-serif);font-size:14px;font-weight:600;margin:0 0 8px;display:flex;align-items:center;gap:6px;"><i class="bi bi-folder2-open" style="color:#5ddeda;"></i> ${esc(subject)}${subject==='Drive'?'<span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;font-weight:400;">(salvos no Google Drive)</span>':''}</h3>`;
+      html+='<div style="display:flex;flex-direction:column;gap:8px;">';
+      bySubject[subject].forEach(r=>{
+        const preview = String(r.summary||'').slice(0,150).replace(/[#*`]/g,'').replace(/\n/g,' ');
+        const date = r.date ? new Date(r.date).toLocaleDateString('pt-BR') : '';
+        const driveBadge = r._drive ? '<span style="color:#5ddeda;font-size:10px;margin-left:6px;flex:none;"><i class="bi bi-cloud-fill"></i> Drive</span>' : '';
+        const previewHtml = r._drive
+          ? '<i style="color:var(--ferreto-text-muted,#8b949e);font-size:12px;font-style:italic;">Resumo salvo no Drive — clique em "Ver" para carregar o conteúdo.</i>'
+          : esc(preview)+(r.summary && r.summary.length>150?'…':'');
+        html+=`<div class="gdi-resumo-card" data-id="${esc(r.id)}" style="background:var(--ferreto-surface-2,rgba(255,255,255,.05));border:1px solid var(--ferreto-border,#21262d);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <span style="color:var(--ferreto-text,#f0f6fc);font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">${esc(r.lesson||'Aula')}${driveBadge}</span>
+            <span style="color:var(--ferreto-text-muted,#8b949e);font-size:11px;flex:none;">${date}</span>
+          </div>
+          <div style="color:var(--ferreto-text-muted,#8b949e);font-size:12.5px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${previewHtml}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="gdi-btn gdi-btn-ghost gdi-resumo-view" data-id="${esc(r.id)}" style="font-size:12px;padding:5px 10px;"><i class="bi bi-eye"></i> Ver</button>
+            <button class="gdi-btn gdi-btn-ghost gdi-resumo-pdf" data-id="${esc(r.id)}" style="font-size:12px;padding:5px 10px;"><i class="bi bi-download"></i> PDF</button>
+            ${!r._drive?`<button class="gdi-btn gdi-btn-ghost gdi-resumo-del" data-id="${esc(r.id)}" style="font-size:12px;padding:5px 10px;color:#ff6b6b;" title="Deletar"><i class="bi bi-trash"></i></button>`:''}
+          </div>
+        </div>`;
       });
+      html+='</div></div>';
+    }
+    html+='</div>';
+    bodyEl.innerHTML=html;
+
+    // 6) Helper: lazy-load conteúdo do Drive
+    const loadDriveContent = async (r) => {
+      if(!r || !r._drive)return r ? r.summary : '';
+      if(r.summary)return r.summary;  // já carregado (cacheado nesta sessão)
+      try{
+        const resp = await fetch(r._downloadUrl);
+        if(!resp.ok)throw new Error('HTTP '+resp.status);
+        const text = await resp.text();
+        r.summary = text;  // cacheia no objeto
+        return text;
+      }catch(e){
+        throw new Error('Não foi possível carregar do Drive: '+e.message);
+      }
+    };
+
+    // 7) Wiring dos botões
+    bodyEl.querySelectorAll('.gdi-resumo-view').forEach(b=>b.onclick=async (ev)=>{
+      const r=all.find(x=>x.id===b.dataset.id);
+      if(!r)return;
+      // Feedback visual no botão enquanto carrega do Drive
+      const orig = b.innerHTML;
+      if(r._drive){
+        b.disabled=true;
+        b.innerHTML='<i class="bi bi-hourglass-split"></i> Carregando…';
+      }
+      try{
+        const content = r._drive ? await loadDriveContent(r) : r.summary;
+        if(content){
+          _summaryModal(r.lesson, content);
+        }else{
+          showToast('Resumo vazio');
+        }
+      }catch(e){
+        showToast(e.message||'Erro ao carregar resumo');
+      }finally{
+        if(r._drive){b.disabled=false;b.innerHTML=orig;}
+      }
+    });
+    bodyEl.querySelectorAll('.gdi-resumo-pdf').forEach(b=>b.onclick=async (ev)=>{
+      const r=all.find(x=>x.id===b.dataset.id);
+      if(!r)return;
+      const orig = b.innerHTML;
+      if(r._drive){
+        b.disabled=true;
+        b.innerHTML='<i class="bi bi-hourglass-split"></i> Carregando…';
+      }
+      try{
+        const content = r._drive ? await loadDriveContent(r) : r.summary;
+        if(content && window.gdiIsaPdf && window.gdiIsaPdf.downloadAsPdf){
+          window.gdiIsaPdf.downloadAsPdf(r.lesson, content);
+        }else if(!content){
+          showToast('Resumo vazio');
+        }else{
+          showToast('downloadAsPdf indisponível');
+        }
+      }catch(e){
+        showToast(e.message||'Erro ao carregar resumo');
+      }finally{
+        if(r._drive){b.disabled=false;b.innerHTML=orig;}
+      }
+    });
+    bodyEl.querySelectorAll('.gdi-resumo-del').forEach(b=>b.onclick=async ()=>{
+      // Só localStorage resumos têm botão deletar (Drive items não têm .gdi-resumo-del)
+      if(!window.gdiModal){
+        if(!confirm('Deletar este resumo?'))return;
+      } else {
+        const ok=await window.gdiModal({title:'Deletar resumo',message:'Tem certeza que deseja deletar este resumo? Esta ação não pode ser desfeita.',confirmText:'Deletar',cancelText:'Cancelar',danger:true});
+        if(!ok)return;
+      }
+      if(window.gdiIsaPdf && window.gdiIsaPdf.delIsaSummary){
+        window.gdiIsaPdf.delIsaSummary(b.dataset.id);
+        window.renderResumos(bodyEl);
+      }
     });
   };
 
-  console.log('[GDI Extras] M9-ISA (PDF extraction + ISA summaries/questions) ativo');
+  console.log('[GDI Extras] M9-ISA (PDF extraction + ISA summaries/questions) ativo — refactored (Task 4-c)');
 })();
 
 // M-AI: WIDGET DA MEGGY 🐩 — poodle tutora de estudos
@@ -2287,6 +2521,9 @@
     body.appendChild(el);body.scrollTop=body.scrollHeight;
     return el;
   }
+  // ═══ PATCH C: renderHistory com cache de HTML parseado por mensagem ═══
+  // Cacheia m._html + m._text; só re-parseia Markdown se o texto mudou.
+  // Usa DocumentFragment para um único reflow.
   function renderHistory(){
     body.innerHTML='';
     if(!messages.length){
@@ -2294,12 +2531,24 @@
       messages.pop();save(); // saudação não conta no histórico
       return;
     }
+    const frag=document.createDocumentFragment();
     messages.forEach(m=>{
       const el=document.createElement('div');
       el.className='gdi-ai-msg '+(m.role==='user'?'user':'assistant');
-      el.innerHTML='<div class="gdi-ai-bubble">'+(m.role==='user'?esc(m.text):renderMd(m.text))+'</div>';
-      body.appendChild(el);
+      // ★ PATCH C: user nunca usa Markdown; assistant cacheia parse
+      if(m.role==='user'){
+        el.innerHTML='<div class="gdi-ai-bubble">'+esc(m.text)+'</div>';
+      }else{
+        // cacheia parse Markdown por conteúdo (invalida se texto mudar)
+        if(!m._html || m._text!==m.text){
+          m._html=renderMd(m.text||'');
+          m._text=m.text;
+        }
+        el.innerHTML='<div class="gdi-ai-bubble">'+m._html+'</div>';
+      }
+      frag.appendChild(el);
     });
+    body.appendChild(frag);
     body.scrollTop=body.scrollHeight;
   }
 
@@ -2428,21 +2677,27 @@
   sendBtn.addEventListener('click',send);
   input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
 
-  // ★ Meggy persiste entre trocas de página — reabre se estava aberta
-  // O widget está em GDI_ROOT() (documentElement) que NÃO é recriado
-  // pelo SPA. As mensagens ficam em sessionStorage. Só precisamos
-  // restaurar o estado aberto/fechado.
+  // ═══ PATCH A: page:change com debounce 1.5s + gate por painel aberto ═══
+  // Antes: a cada navegação, re-parseava Markdown × 20 msgs + iterava TODAS
+  // as questões em updateMemory. Agora: renderHistory só se painel aberto,
+  // e updateMemory é debounced 1.5s + throttle 30s quando painel fechado.
+  let _memDebounce=null;
   Bus.onGlobal('page:change',()=>{
-    // re-renderiza o histórico se o painel estiver aberto
-    if(panel.classList.contains('open')){
+    const isOpen=panel && panel.classList.contains('open');
+    if(isOpen){
       renderHistory();
       updateStatus();
     }
-    // atualiza memória com a aula atual
-    const lesson=document.querySelector('.gdi-file-header-name');
-    if(lesson&&lesson.textContent){
-      updateMemory(lesson.textContent.trim());
-    }
+    clearTimeout(_memDebounce);
+    _memDebounce=setTimeout(()=>{
+      // só recalcular memória se o painel estiver aberto OU a cada 30s
+      if(!isOpen && Date.now()-(window._meggyLastMem||0)<30000) return;
+      const lesson=document.querySelector('.gdi-file-header-name');
+      if(lesson&&lesson.textContent){
+        window._meggyLastMem=Date.now();
+        updateMemory(lesson.textContent.trim());
+      }
+    },1500);
   });
   // restaura estado aberto ao carregar
   try{
@@ -2496,5 +2751,5 @@
   }
   fab.addEventListener('click',()=>{sessionStorage.setItem('gdi-ai-seen','1');},{once:true});
 
-  console.log('[GDI Extras] M-AI widget Meggy 🐩 — poodle tutora ativo');
+  console.log('[GDI Extras] M-AI widget Meggy 🐩 — poodle tutora ativo — refactored (Task 4-c)');
 })();

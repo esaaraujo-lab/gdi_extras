@@ -204,6 +204,62 @@ if(!window.DOMPurify && !window.__gdiPurifyLoading){
   document.head.appendChild(s);
 }
 
+// ═══ HELPER GLOBAL: CONSOLIDATED pdf.js LOADER (★C.1 — PATCH F) ═══
+// Idempotente: carrega pdfjs-dist@3.11.174 uma única vez e seta workerSrc
+// UMA vez (antes: 4 loaders diferentes competiam, causando race conditions).
+// M9 (mobile), gdi-pdf.js, gdi-meggy.js e gdi-study.js devem usar isto.
+window.gdiEnsurePdfjs = window.gdiEnsurePdfjs || function(){
+  if(window._pdfjsPromise)return window._pdfjsPromise;
+  const PDFJS_LIB='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+  const PDFJS_WORKER='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  window._pdfjsPromise=new Promise((resolve,reject)=>{
+    // carrega o script UMA vez (se já carregado, pula esta etapa)
+    const loadScript = ()=>new Promise((res,rej)=>{
+      if(window.pdfjsLib)return res();
+      const s=document.createElement('script');
+      s.src=PDFJS_LIB;
+      s.crossOrigin='anonymous';
+      s.onload=res;
+      s.onerror=()=>rej(new Error('pdf.js failed to load'));
+      document.head.appendChild(s);
+    });
+    loadScript().then(()=>{
+      if(!window.pdfjsLib){
+        return reject(new Error('pdf.js loaded but pdfjsLib missing'));
+      }
+      // ★C.1: ÚNICA atribuição de workerSrc (guard _gdiWorkerSrcSet — idempotente)
+      if(!window.pdfjsLib._gdiWorkerSrcSet){
+        try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_WORKER;}catch(_){}
+        window.pdfjsLib._gdiWorkerSrcSet=true;
+      }
+      resolve(window.pdfjsLib);
+    }).catch(reject);
+  });
+  return window._pdfjsPromise;
+};
+
+// ═══ HELPER GLOBAL: STREAK CACHE (★C.4) ═══
+// Pré-computa o streak (dias seguidos assistindo) uma vez por user:ready
+// e incrementalmente em watched:changed. O handler de timeupdate em M5
+// lê o cache (O(1)) em vez de re-loopar todos os watched (O(N)) a cada
+// segundo de vídeo.
+window._gdiStreakCache = window._gdiStreakCache || 0;
+window._gdiComputeStreak = window._gdiComputeStreak || function(){
+  try{
+    const d=(window.GDIUser&&GDIUser.dump)?GDIUser.dump():{};
+    const w=d.watched||{};
+    const acts={};
+    const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
+    for(const k in w)touch(w[k]&&w[k].at);
+    let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
+    if(!has(dd))dd.setDate(dd.getDate()-1);
+    while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
+    window._gdiStreakCache=streak;
+  }catch(_){}
+};
+Bus.onGlobal('user:ready',window._gdiComputeStreak);
+Bus.onGlobal('watched:changed',window._gdiComputeStreak);
+
 // ── CSS dos módulos (injetado 1×) ──
 (function(){if(document.getElementById('gdi-extras-style'))return;const s=document.createElement('style');s.id='gdi-extras-style';s.textContent=`
 .gdi-debug-wrap{width:100%;background:#0d1117;border-top:2px solid #f0883e;font-family:monospace;font-size:12px;}
@@ -448,15 +504,12 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
           try{
             const d=window.GDIUser&&GDIUser.dump?GDIUser.dump():{};
             const w=d.watched||{};
-            // streak (já calculado em M22, mas recalcular aqui por segurança)
-            const acts={};const touch=ts=>{if(ts){const k=new Date(ts).toDateString();acts[k]=(acts[k]||0)+1;}};
-            for(const k in w)touch(w[k]&&w[k].at);
-            let streak=0;const dd=new Date();const has=x=>acts[x.toDateString()];
-            if(!has(dd))dd.setDate(dd.getDate()-1);
-            while(has(dd)){streak++;dd.setDate(dd.getDate()-1);}
+            // ★C.4: streak lê do cache (O(1)) — recalculado só em user:ready
+            // e watched:changed. Antes: re-loopava todos os watched a cada
+            // timeupdate (O(N) por segundo de vídeo).
             window.gdiAchievements.checkAll({
               watched:Object.keys(w).length,
-              streak:streak,
+              streak:window._gdiStreakCache||0,
               cardsStudied:parseInt(localStorage.getItem('gdi-cards-studied-count')||'0'),
               simulados:parseInt(localStorage.getItem('gdi-simulados-count')||'0'),
               goalMet:false,
@@ -778,11 +831,33 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
       if(tabs&&body&&(tabs.querySelector('.gdi-mat-tab')||body.querySelector('.gdi-mat-empty')))return;
     }
     let panel=null;
-    for(let i=0;i<40;i++){
-      panel=ensurePanel();
-      if(panel&&panel.tabsEl&&panel.bodyEl)break;
+    panel=ensurePanel();
+    if(!panel||!panel.tabsEl||!panel.bodyEl){
+      // ★C.3: busy-wait 40×200ms removido. Em vez disso, escuta o evento
+      // Bus 'slots:ready' (emitido pelo app.min.js quando os slots são criados).
+      // Fallback one-shot de 5s: se o evento não disparar, faz um retry.
+      // Bus não tem offGlobal — o listener vira no-op após o primeiro disparo
+      // (guard flag `done`).
+      await new Promise(resolve=>{
+        let done=false;
+        const onReady=()=>{if(!done){done=true;resolve();}};
+        // ★ FIX 11 (Task 21): was `if(window.Bus&&typeof Bus.onGlobal==='function')` —
+        // but Bus is declared with `const` in app.min.js, so `window.Bus` is undefined.
+        // The check always failed, so the slots:ready listener was never registered and
+        // the materials panel waited the full 5s fallback timeout before showing.
+        // Use `typeof Bus !== 'undefined'` (matches gdi-extras-loader.js line 121).
+        if(typeof Bus !== 'undefined' && typeof Bus.onGlobal === 'function'){
+          Bus.onGlobal('slots:ready',onReady);
+        }
+        setTimeout(()=>{if(!done){done=true;resolve();}},5000);
+      });
       if(myGen!==gen)return;
-      await sleep(200);
+      panel=ensurePanel();
+      // one retry após a espera
+      if(!panel||!panel.tabsEl||!panel.bodyEl){
+        await sleep(200);
+        panel=ensurePanel();
+      }
     }
     if(!panel||!panel.tabsEl||!panel.bodyEl)return;
     const{tabsEl,bodyEl,statusEl}=panel;
@@ -796,7 +871,34 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
     const isPdf=x=>(x.fileExtension||'').toLowerCase()==='pdf'||/pdf/i.test(x.mimeType||'');
     try{
       let found=[];
-      const here=await gdiListAllFiles(fPath,gdiGetPw(fPath));
+      // ★C.2: se window.playlistVideos já tem itens de fPath, a chamada
+      // gdiListAllFiles abaixo bate no cache do worker-bridge (sem network).
+      // A verificação é defensiva — em caso de falha na rede, recupera de
+      // playlistVideos (só vídeos, sem PDFs, mas evita travar o M9).
+      const _plFromThisFolder=!!(window.playlistVideos&&Array.isArray(window.playlistVideos)&&
+        window.playlistVideos.length&&
+        window.playlistVideos.some(v=>v&&typeof v.pageUrl==='string'&&v.pageUrl.indexOf(fPath)===0));
+      let here;
+      try{
+        here=await gdiListAllFiles(fPath,gdiGetPw(fPath));
+      }catch(_){
+        here=[];
+        if(_plFromThisFolder){
+          // ★C.2: fallback — reusa playlistVideos (vídeos só, sem PDFs)
+          here=window.playlistVideos
+            .filter(v=>v&&typeof v.pageUrl==='string'&&v.pageUrl.indexOf(fPath)===0)
+            .map(v=>{
+              const nm=v.origName||v.name||'';
+              return{
+                name:nm,
+                fileExtension:((nm.split('.').pop()||'').toLowerCase()),
+                mimeType:v.mimeType||'',
+                size:v.sizeBytes||0,
+                link:v.rawLink||''
+              };
+            });
+        }
+      }
       found=here.filter(isPdf);
       if(!found.length){
         const subs=here.filter(x=>x.mimeType==='application/vnd.google-apps.folder').slice(0,20);
@@ -879,19 +981,9 @@ body.gdi-fm .gdi-mat-body{height:calc(100dvh - 180px);min-height:480px;}
           // tenta renderizar com pdf.js (viewer embutido)
           (async()=>{
             try{
-              if(!window.pdfjsLib){
-                // carrega pdf.js dinamicamente
-                await new Promise((res,rej)=>{
-                  const s=document.createElement('script');
-                  s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
-                  s.crossOrigin='anonymous';
-                  s.onload=res;s.onerror=()=>rej(new Error('pdf.js falhou'));
-                  document.head.appendChild(s);
-                });
-                if(window.pdfjsLib){
-                  try{window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';}catch(_){}
-                }
-              }
+              // ★C.1: usa o loader consolidado (idempotente, workerSrc setado 1×)
+              // em vez do loader local que competia com outros módulos.
+              await window.gdiEnsurePdfjs();
               if(!window.pdfjsLib)throw new Error('pdf.js indisponível');
               const viewer=bodyEl.querySelector('#gdi-mat-mobile-viewer');
               if(!viewer)return;
