@@ -432,8 +432,7 @@
     const qs=questions();
     const sims=simus().slice().reverse();
     // lista cursos do aluno para filtrar questões por curso
-    // ★ Task 26: usa window.__gdiCollectCourses (collectCourses está em IIFE diferente)
-    const courses=(window.__gdiCollectCourses||function(){return []})();
+    const courses=collectCourses();
     const courseNames=courses.map(c=>{
       const seg=c.key.split('/').filter(Boolean).slice(1).join('/');
       let n=seg||c.key;
@@ -1075,8 +1074,6 @@
 
     return [...map.values()].sort((a,b)=>b.lastAt-a.lastAt);
   }
-  // ★ Task 26: exporta collectCourses pra window (renderSimulado/renderRadar estão em IIFEs diferentes)
-  window.__gdiCollectCourses = collectCourses;
   // ★ helpers para ocultar/restaurar cursos
   function hideCourse(ck){
     const hidden=lsGet(LS_HIDDEN,[]);
@@ -1290,7 +1287,7 @@
       {id:'simulado',icon:'bi-stopwatch',label:'Simulado'}
     ]},
     {label:'Materiais',tabs:[
-      {id:'addmateria',icon:'bi-folder-plus',label:'Adicionar matéria'},  // ★ FIX 1a (Task 14): RE-ADICIONADO — user pediu para voltar
+      {id:'addmateria',icon:'bi-folder-plus',label:'Adicionar Cursos'},  // ★ FIX MANUAL: renomeado de "Adicionar matéria" para "Adicionar Cursos" (user request)
       {id:'resumos',icon:'bi-clipboard',label:'Resumos'},
       {id:'provas',icon:'bi-file-earmark-text',label:'Provas'},
       {id:'redacao',icon:'bi-pencil-square',label:'Redação'}
@@ -1442,7 +1439,7 @@
     const t=todayMin(),g=goalMin(),pct=Math.min(100,Math.round(t/g*100));
     const cards=lsGet(LS_CARDS,[]);
     const dueCount=cards.filter(c=>(c.due||0)<=Date.now()).length;
-    const courses=(window.__gdiCollectCourses||function(){return []})();
+    const courses=collectCourses();
     // usa localStorage direto (M23 está em escopo diferente)
     const questionsCount=lsGet('gdi-questions-v1',[]).length;
     const simuladosCount=lsGet('gdi-simulados-v1',[]).length;
@@ -1698,7 +1695,7 @@
   // ★ REMOVIDO: tab cursos (user request) — função MANTIDA para preservar API pública
   // (window.renderCursos e window.gdiRefreshCentralPanel podem ser chamados por outros módulos)
   async function renderCursos(box){
-    const cs=(window.__gdiCollectCourses||function(){return []})();
+    const cs=collectCourses();
     const hidden=listHiddenCourses();
     if(!cs.length){
       box.innerHTML=`<div class="gdi-empty-state">
@@ -2547,7 +2544,11 @@
             ${drive?`<small style="color:var(--ferreto-secondary,#5ddeda);font-size:11px;"><i class="bi bi-hdd"></i> ${escHtml(drive)}</small>`:''}
           </div>
         </div>
-        <button id="gdi-detail-hide" class="gdi-mode-btn" style="font-size:11px;color:#ff8b8b;border-color:rgba(255,107,107,.3);" title="Ocultar curso"><i class="bi bi-eye-slash"></i> Ocultar</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <button id="gdi-detail-restart-scan" data-course-key="${escHtml(c.key)}" style="font-size:12px;color:var(--ferreto-secondary,#5ddeda);border:1px solid rgba(93,222,218,.3);border-radius:8px;cursor:pointer;padding:6px 10px;background:transparent;" title="Reiniciar scanner"><i class="bi bi-arrow-repeat"></i> Reiniciar Scan</button>
+          <button id="gdi-detail-remove" data-course-key="${escHtml(c.key)}" style="font-size:12px;color:#ff8b8b;border:1px solid rgba(255,107,107,.3);border-radius:8px;cursor:pointer;padding:6px 10px;background:transparent;" title="Remover curso"><i class="bi bi-trash3"></i> Remover</button>
+          <button id="gdi-detail-hide" class="gdi-mode-btn" style="font-size:11px;color:#ff8b8b;border-color:rgba(255,107,107,.3);" title="Ocultar curso"><i class="bi bi-eye-slash"></i> Ocultar</button>
+        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:18px;">
@@ -2685,6 +2686,60 @@
         renderCursos(box);
       }
     };
+    // ★ Task FINAL / Fix 2c: botão "Remover" — remove o curso permanentemente
+    //   do localStorage (não apenas oculta). Pede confirmação via modal.
+    box.querySelector('#gdi-detail-remove').onclick=async ()=>{
+      const ok=await window.gdiModal({
+        title:'Remover curso',
+        message:'Remover "'+name+'" definitivamente da sua lista? Esta ação não pode ser desfeita. (Ocultar é reversível; Remover apaga o registro local.)',
+        confirmText:'Remover',
+        cancelText:'Cancelar',
+        danger:true
+      });
+      if(!ok) return;
+      try{
+        const LS_MANUAL_RM='gdi-manual-courses-v1';
+        const manual=lsGet(LS_MANUAL_RM,[]);
+        const next=manual.filter(m=>!m || m.path!==c.key);
+        lsSet(LS_MANUAL_RM,next);
+        // limpa estado do scanner e cache de aulas
+        if(window.gdiCourseScanner){
+          try{window.gdiCourseScanner.clearScanState(c.key);}catch(_){}
+        }
+        // limpa também da lista de ocultos (se estava oculto)
+        try{unhideCourse(c.key);}catch(_){}
+        showToast('Curso removido');
+        renderCursos(box);
+      }catch(e){
+        showToast('Erro ao remover: '+(e&&e.message||e));
+      }
+    };
+    // ★ Task FINAL / Fix 2d: botão "Reiniciar Scan" — limpa o estado do
+    //   scanner e dispara um novo scan imediatamente.
+    box.querySelector('#gdi-detail-restart-scan').onclick=function(){
+      const restartBtn=box.querySelector('#gdi-detail-restart-scan');
+      const ck=(restartBtn && restartBtn.dataset && restartBtn.dataset.courseKey) || c.key;
+      try{
+        if(window.gdiCourseScanner){
+          window.gdiCourseScanner.clearScanState(ck);
+          window.gdiCourseScanner.startScan(ck, function(state, lessonsData){
+            try{
+              if(state.status==='done' || state.status==='error'){
+                const fresh=collectCourses();
+                const fc=fresh.find(x=>x.key===c.key);
+                if(fc) openCourseDetail(box, fc);
+                else try{ openCourseDetail(box, c); }catch(__){}
+              }
+            }catch(_){}
+          });
+          showToast('Scan reiniciado');
+        }else{
+          showToast('Scanner indisponível');
+        }
+      }catch(e){
+        showToast('Erro ao reiniciar scan: '+(e&&e.message||e));
+      }
+    };
     const contBtn=box.querySelector('#gdi-detail-continue');
     bestIn(c.key).then(target=>{
       if(target){
@@ -2732,7 +2787,7 @@
               }else if(state.status === 'done' || state.status === 'error'){
                 // Re-renderiza o detalhe com dados frescos do scanner
                 try{
-                  const fresh = (window.__gdiCollectCourses||function(){return []})();
+                  const fresh = collectCourses();
                   const fc = fresh.find(x => x.key === c.key);
                   if(fc) openCourseDetail(box, fc);
                 }catch(_){
@@ -3846,7 +3901,7 @@
       cron.plan.forEach(t=>{if(t&&t.name&&t.type==='study')aulasMenosEstudadas.push(t.name);});
     }
     const trails=window.gdiTrails?window.gdiTrails.get():[];
-    const courses=(window.__gdiCollectCourses||function(){return []})();
+    const courses=collectCourses();
     const subjects=Object.entries(bySubject).filter(([,v])=>v.total>=1).sort((a,b)=>b[1].total-a[1].total);
     if(!subjects.length){
       box.innerHTML=`<div class="gdi-notes-empty" style="padding:60px 20px;text-align:center;">
@@ -4352,120 +4407,75 @@
   // Main scan function — incremental, resumable.
   // courseKey == coursePath (the Drive folder path, e.g. /4:/CANTE COM EXCELENCIA 2.0/)
   // Calls onProgress(state, lessonsData) after each folder.
+  // ★ Task 32: scanner usa API server-side (POST /api/courses/scan-progress)
+  //    Antes: client-side fazia centenas de fetches individuais → travava em 19%
+  //    Agora: 1 único POST pro servidor, que escaneia tudo recursivamente
+  //    O servidor tem acesso direto ao Google Drive API (sem CORS, sem Worker bridge)
   async function scanCourse(courseKey, onProgress){
-    if(!courseKey)return null;
-
-    // Load or create state
-    let state = getScanState(courseKey);
-    if(state && state.status === 'scanning'){
-      // Already scanning — don't start another instance (constraint).
-      // Wire onProgress to fire on the next state save by polling once.
-      try{ if(onProgress) onProgress(state, getLessons(courseKey)); }catch(_){}
-      return state;
-    }
-
-    state = state || {
-      courseKey: courseKey,
+    let state = getScanState(courseKey) || {
+      courseId: courseKey,
       coursePath: courseKey,
-      status: 'scanning',  // 'scanning' | 'done' | 'error' | 'paused'
+      status: 'scanning',
       startedAt: Date.now(),
       scannedFolders: 0,
-      totalFolders: 0,
-      queue: [courseKey],  // folders to scan (BFS) — starts with the course root
-      scanned: [],         // folders already scanned
-      depth: 0
+      totalFolders: 1,
+      queue: [],
+      scanned: []
     };
-
-    // If already done, skip (caller can still read lessons via getCourseLessons)
-    if(state.status === 'done'){
-      try{ if(onProgress) onProgress(state, getLessons(courseKey)); }catch(_){}
+    state.status = 'scanning';
+    state.startedAt = Date.now();
+    setScanState(courseKey, state);
+    if(onProgress) try{ onProgress(state, getLessons(courseKey)); }catch(_){}
+    
+    try {
+      // ★ 1 POST request — servidor escaneia TODO o curso recursivamente
+      const r = await fetch('/api/courses/scan-progress', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({coursePath: courseKey})
+      });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d = await r.json();
+      if(!d || !d.ok) throw new Error(d && d.error || 'scan falhou');
+      
+      // Servidor retorna {lessons: [...], total: N, ...}
+      const lessons = d.lessons || [];
+      if(d.cached){
+        console.log('[Scanner] cache hit! Curso já escaneado por outro aluno — sem re-scan');
+      }else{
+        console.log('[Scanner] scan completo:', lessons.length, 'aulas encontradas');
+      }
+      const lessonsData = {
+        lessons: lessons,
+        scanned: true,
+        totalFolders: d.totalFolders || 1,
+        totalLessons: lessons.length
+      };
+      setLessons(courseKey, lessonsData);
+      
+      // Atualiza estado
+      state.status = 'done';
+      state.completedAt = Date.now();
+      state.scannedFolders = state.totalFolders;
+      setScanState(courseKey, state);
+      
+      // Salva no Drive (não-bloqueante)
+      try {
+        if(window.GDIStorage && window.GDIStorage.saveMaterial) {
+          window.GDIStorage.saveMaterial(courseKey, courseKey, 'lessons', JSON.stringify(lessonsData)).catch(()=>{});
+        }
+      } catch(_){}
+      
+      if(onProgress) try{ onProgress(state, lessonsData); }catch(_){}
+      return state;
+    } catch(e) {
+      console.error('[Scanner] erro:', e.message);
+      state.status = 'error';
+      state.error = e.message;
+      setScanState(courseKey, state);
+      if(onProgress) try{ onProgress(state, getLessons(courseKey)); }catch(_){}
       return state;
     }
-
-    state.status = 'scanning';
-    state.error = null;
-    setScanState(courseKey, state);
-
-    const lessonsData = getLessons(courseKey);
-    if(!Array.isArray(lessonsData.lessons)) lessonsData.lessons = [];
-
-    // Process queue incrementally — 1 folder per iteration (SCAN_BATCH=1)
-    let iter = 0;
-    while(state.queue.length > 0){
-      const folder = state.queue.shift();
-
-      // Skip if already scanned (dedupe safety)
-      if(state.scanned.indexOf(folder) >= 0) continue;
-      state.scanned.push(folder);
-      state.scannedFolders++;
-
-      const depth = depthOf(folder, courseKey);
-
-      // Scan this folder (via worker bridge — doesn't block UI)
-      const result = await scanFolder(folder, depth);
-
-      // Add lessons (dedupe by path)
-      if(result.lessons && result.lessons.length){
-        for(let i=0; i<result.lessons.length; i++){
-          const l = result.lessons[i];
-          let dup = false;
-          for(let j=0; j<lessonsData.lessons.length; j++){
-            if(lessonsData.lessons[j].path === l.path){ dup = true; break; }
-          }
-          if(!dup) lessonsData.lessons.push(l);
-        }
-      }
-
-      // Queue subfolders (BFS) — only if depth < MAX
-      if(depth < SCAN_MAX_DEPTH && result.subfolders && result.subfolders.length){
-        for(let i=0; i<result.subfolders.length; i++){
-          const sf = result.subfolders[i];
-          if(!sf || !sf.name) continue;
-          const subPath = folder + encodeURIComponent(sf.name) + '/';
-          if(state.scanned.indexOf(subPath) < 0 && state.queue.indexOf(subPath) < 0){
-            state.queue.push(subPath);
-          }
-        }
-      }
-
-      state.totalFolders = state.scannedFolders + state.queue.length;
-
-      // Save state + lessons (resumable)
-      setScanState(courseKey, state);
-      lessonsData.scanned = false;
-      lessonsData.totalFolders = state.totalFolders;
-      lessonsData.totalLessons = lessonsData.lessons.length;
-      setLessons(courseKey, lessonsData);
-
-      // Progress callback (live updates tile)
-      try{ if(onProgress) onProgress(state, lessonsData); }catch(_){}
-
-      iter++;
-      // ★ Pause between folders — don't block UI (constraint: 500ms)
-      await new Promise(r => setTimeout(r, SCAN_PAUSE_MS));
-    }
-
-    // Done!
-    state.status = 'done';
-    state.completedAt = Date.now();
-    setScanState(courseKey, state);
-
-    lessonsData.scanned = true;
-    lessonsData.totalFolders = state.scannedFolders;
-    lessonsData.totalLessons = lessonsData.lessons.length;
-    setLessons(courseKey, lessonsData);
-
-    // Save to Drive — non-blocking. Uses GDIStorage.saveMaterial which POSTs
-    // to /api/materials/save and stores under <userFolder>/lessons/<hash>.json
-    // The kind='lessons' is a new convention for course structure files.
-    try{
-      if(window.GDIStorage && typeof window.GDIStorage.saveMaterial === 'function'){
-        window.GDIStorage.saveMaterial(courseKey, courseKey, 'lessons', JSON.stringify(lessonsData)).catch(()=>{});
-      }
-    }catch(_){}
-
-    try{ if(onProgress) onProgress(state, lessonsData); }catch(_){}
-    return state;
   }
 
   // Get scan progress for a course (for tile display)
@@ -4517,14 +4527,17 @@
       return;
     }
     // Check if already scanning (constraint: no multiple instances per course)
-    // ★ Task 27: se o scan foi iniciado há mais de 10min, considera travado e reinicia
     const existing = getScanState(courseKey);
     if(existing && existing.status === 'scanning'){
-      const ageMin = existing.startedAt ? (Date.now() - existing.startedAt) / 60000 : 0;
-      if(ageMin > 10){
+      // ★ Task FINAL / Fix 2b: se o scan está "preso" há mais de 5 minutos,
+      // provavelmente travou (página fechada no meio, erro não capturado, etc).
+      // Nesse caso, limpa o estado e reinicia. Antes, o scanner ficava preso
+      // para sempre mostrando "scan já em andamento".
+      const ageMin = existing.startedAt ? (Date.now() - existing.startedAt) / 60000 : 999;
+      if(ageMin > 5){
         console.log('[Scanner] scan travado há', Math.round(ageMin), 'min — reiniciando', courseKey);
-        // não retorna — continua pra reiniciar
-      }else{
+        clearScanState(courseKey);
+      } else {
         console.log('[Scanner] scan já em andamento para', courseKey, '— não iniciando duplicata');
         try{ if(onProgress) onProgress(existing, getLessons(courseKey)); }catch(_){}
         return;
@@ -4544,6 +4557,11 @@
   }
 
   // Resume any interrupted scans on page load (e.g., user reloaded mid-scan)
+  // ★ Task FINAL / Fix 2a: SEMPRE limpa estado "scanning" preso e reinicia.
+  //   Antes, o status 'scanning' era mantido — mas se a página foi fechada no
+  //   meio do scan, o estado fica preso para sempre ("scan já em andamento").
+  //   Agora, qualquer 'scanning' residual ao recarregar a página é tratado
+  //   como travado: limpa e reinicia.
   function resumeInterruptedScans(){
     try{
       const manual = JSON.parse(localStorage.getItem('gdi-manual-courses-v1') || '[]');
@@ -4552,8 +4570,8 @@
         if(!m || !m.path) continue;
         const state = getScanState(m.path);
         if(state && state.status === 'scanning'){
-          // Status was 'scanning' when page unloaded — resume
-          console.log('[Scanner] resumindo scan interrompido:', m.path);
+          console.log('[Scanner] scan preso detectado — limpando e reiniciando:', m.path);
+          clearScanState(m.path);
           startScan(m.path, null);
         }
       }
